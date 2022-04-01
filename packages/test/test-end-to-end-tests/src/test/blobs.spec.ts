@@ -412,4 +412,15 @@ describeNoCompat("blobs", (getTestObjectProvider) => {
         const loaderWithNoBlobStorage = provider.makeTestLoader(testContainerConfig);
         await assert.rejects(loaderWithNoBlobStorage.rehydrateDetachedContainerFromSnapshot(snapshot));
     });
+
+    // This is a regression test for a bug fixed in 0.59 and can be added to the full compat tests once LTS is > 0.58.
+    // It should be structurally near the analogous test for simultaneous blob upload on a single client.
+    it("correctly handles simultaneous blob upload from different clients", async () => {
+        const blob = stringToBuffer("some different yet still random text", "utf-8");
+        const container1 = await provider.makeTestContainer(testContainerConfig);
+        const dataStore1 = await requestFluidObject<ITestDataObject>(container1, "default");
+        const container2 = await provider.loadTestContainer(testContainerConfig);
+        const dataStore2 = await requestFluidObject<ITestDataObject>(container2, "default");
+        await Promise.all([dataStore1._runtime.uploadBlob(blob), dataStore2._runtime.uploadBlob(blob)]);
+    });
 });

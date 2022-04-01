@@ -147,7 +147,10 @@ export class BlobManager {
     }
 
     public processBlobAttachOp(blobId: string, local: boolean) {
-        assert(!local || this.pendingBlobIds.has(blobId), 0x1f8 /* "local BlobAttach op with no pending blob" */);
+        // local blob attach ops should refer to known blobs. Typically these should be pending, but
+        // if another client submitted the same blob contents concurrently and their blob attach op
+        // gets sequenced first, the blob may already be marked as uploaded.
+        assert(!local || this.pendingBlobIds.has(blobId) || this.blobIds.has(blobId), 0x1f8);
         this.pendingBlobIds.get(blobId)?.resolve();
         this.pendingBlobIds.delete(blobId);
         this.blobIds.add(blobId);
