@@ -111,6 +111,7 @@ export class Client {
     applyStashedOp(op: IMergeTreeGroupMsg): SegmentGroup[];
     // (undocumented)
     applyStashedOp(op: IMergeTreeOp): SegmentGroup | SegmentGroup[];
+    changeReferenceType(reference: ReferencePosition, refType: ReferenceType): void;
     // (undocumented)
     cloneFromSegments(): Client;
     // (undocumented)
@@ -152,6 +153,10 @@ export class Client {
     };
     // (undocumented)
     getShortClientId(longClientId: string): number;
+    getSlideOnRemoveReferencePosition(pos: number, op: ISequencedDocumentMessage): {
+        segment: ISegment | undefined;
+        offset: number | undefined;
+    };
     // (undocumented)
     getStackContext(startPos: number, rangeLabels: string[]): RangeStackMap;
     // (undocumented)
@@ -1034,6 +1039,11 @@ export class MergeTree {
     getMarkerFromId(id: string): ISegment | undefined;
     // (undocumented)
     getPosition(node: MergeNode, refSeq: number, clientId: number): number;
+    // @internal
+    getSlideOnRemoveReferenceSegmentAndOffset(pos: number, refSeq: number, clientId: number): {
+        segment: ISegment | undefined;
+        offset: number | undefined;
+    };
     // (undocumented)
     getStackContext(startPos: number, clientId: number, rangeLabels: string[]): RangeStackMap;
     // (undocumented)
@@ -1083,8 +1093,12 @@ export class MergeTree {
     root: IMergeBlock;
     // (undocumented)
     setMinSeq(minSeq: number): void;
+    // @internal
+    slideReference(ref: LocalReference): void;
     // (undocumented)
     startCollaboration(localClientId: number, minSeq: number, currentSeq: number): void;
+    // @internal
+    updateSegmentRefsAfterMarkRemoved(segment: ISegment, pending: boolean): void;
     // (undocumented)
     walkAllSegments<TClientData>(block: IMergeBlock, action: (segment: ISegment, accum?: TClientData) => boolean, accum?: TClientData): boolean;
 }
@@ -1352,6 +1366,8 @@ export enum ReferenceType {
     // (undocumented)
     SlideOnRemove = 64,
     // (undocumented)
+    StayOnRemove = 128,
+    // (undocumented)
     Tile = 1,
     // (undocumented)
     Transient = 256
@@ -1376,7 +1392,7 @@ export function refHasTileLabel(refPos: ReferencePosition, label: string): boole
 export function refHasTileLabels(refPos: ReferencePosition): boolean;
 
 // @public (undocumented)
-export function refTypeIncludesFlag(refPos: ReferencePosition, flags: ReferenceType): boolean;
+export function refTypeIncludesFlag(refPosOrType: ReferencePosition | ReferenceType, flags: ReferenceType): boolean;
 
 // @public (undocumented)
 export const reservedMarkerIdKey = "markerId";

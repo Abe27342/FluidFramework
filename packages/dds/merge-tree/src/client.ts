@@ -5,6 +5,7 @@
 
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 
+import { UsageError } from "@fluidframework/container-utils";
 import { IFluidHandle } from "@fluidframework/core-interfaces";
 import { IFluidSerializer } from "@fluidframework/shared-object-base";
 import { ISequencedDocumentMessage, MessageType } from "@fluidframework/protocol-definitions";
@@ -16,7 +17,7 @@ import { LoggingError } from "@fluidframework/telemetry-utils";
 import { IIntegerRange } from "./base";
 import { RedBlackTree } from "./collections";
 import { UnassignedSequenceNumber, UniversalSequenceNumber } from "./constants";
-import { LocalReference } from "./localReference";
+import { LocalReference, _validateReferenceType } from "./localReference";
 import {
     CollaborationWindow,
     compareStrings,
@@ -53,7 +54,7 @@ import { SnapshotLegacy } from "./snapshotlegacy";
 import { SnapshotLoader } from "./snapshotLoader";
 import { MergeTreeTextHelper } from "./textSegment";
 import { SnapshotV1 } from "./snapshotV1";
-import { ReferencePosition, RangeStackMap, DetachedReferencePosition } from "./referencePositions";
+import { ReferencePosition, RangeStackMap, DetachedReferencePosition, refTypeIncludesFlag } from "./referencePositions";
 import {
     IMergeTreeClientSequenceArgs,
     IMergeTreeDeltaOpArgs,
@@ -575,13 +576,14 @@ export class Client {
 
     /**
      * Gets the client args from the op if remote, otherwise uses the local clients info
-     * @param opArgs - The op arg to get the client sequence args for
+     * @param sequencedMessage - The sequencedMessage to get the client sequence args for
      */
-    private getClientSequenceArgs(opArgs: IMergeTreeDeltaOpArgs): IMergeTreeClientSequenceArgs {
+     private getClientSequenceArgsForMessage(sequencedMessage: ISequencedDocumentMessage | undefined):
+        IMergeTreeClientSequenceArgs {
         // If there this no sequenced message, then the op is local
         // and unacked, so use this clients sequenced args
         //
-        if (!opArgs.sequencedMessage) {
+        if (!sequencedMessage) {
             const segWindow = this.getCollabWindow();
             return {
                 clientId: segWindow.clientId,
@@ -590,11 +592,19 @@ export class Client {
             };
         } else {
             return {
-                clientId: this.getShortClientId(opArgs.sequencedMessage.clientId),
-                referenceSequenceNumber: opArgs.sequencedMessage.referenceSequenceNumber,
-                sequenceNumber: opArgs.sequencedMessage.sequenceNumber,
+                clientId: this.getOrAddShortClientId(sequencedMessage.clientId),
+                referenceSequenceNumber: sequencedMessage.referenceSequenceNumber,
+                sequenceNumber: sequencedMessage.sequenceNumber,
             };
         }
+    }
+
+    /**
+     * Gets the client args from the op if remote, otherwise uses the local clients info
+     * @param opArgs - The op arg to get the client sequence args for
+     */
+    private getClientSequenceArgs(opArgs: IMergeTreeDeltaOpArgs): IMergeTreeClientSequenceArgs {
+        return this.getClientSequenceArgsForMessage(opArgs.sequencedMessage);
     }
 
     private ackPendingSegment(opArgs: IMergeTreeDeltaOpArgs) {
@@ -1069,17 +1079,49 @@ export class Client {
     }
 
     getContainingSegment<T extends ISegment>(pos: number, op?: ISequencedDocumentMessage) {
-        let seq: number;
-        let clientId: number;
-        if (op) {
-            clientId = this.getOrAddShortClientId(op.clientId);
-            seq = op.referenceSequenceNumber;
-        } else {
-            const segWindow = this.mergeTree.getCollabWindow();
-            seq = segWindow.currentSeq;
-            clientId = segWindow.clientId;
+        const args = this.getClientSequenceArgsForMessage(op);
+        return this.mergeTree.getContainingSegment<T>(pos, args.referenceSequenceNumber, args.clientId);
+    }
+
+    /**
+     * Returns the segment and offset for creating a SlideOnRemove reference position
+     * in response to a remote op.
+     * Will return a location which is slid in an eventually consistent way.
+     * @param pos - The remote position
+     * @param op - The remote op
+     * @returns - segment and offset at which to create a SlideOnRemove reference position.
+     */
+    getSlideOnRemoveReferencePosition(pos: number, op: ISequencedDocumentMessage) {
+        const args = this.getClientSequenceArgsForMessage(op);
+        const segoff = this.mergeTree.getSlideOnRemoveReferenceSegmentAndOffset(
+            pos, args.referenceSequenceNumber, args.clientId);
+        if (!segoff.segment || segoff.offset === undefined || segoff.offset < 0) {
+            throw new Error("Invalid reference location");
         }
-        return this.mergeTree.getContainingSegment<T>(pos, seq, clientId);
+        return segoff;
+    }
+
+    /**
+     * Changes the type of a LocalReference. Only supports changing
+     * to a type which includes SlideOnRemove.
+     * @param reference - The reference to change. Must be a LocalReference.
+     * @param refType - The type to change to. Must include SlideOnRemove.
+     */
+    changeReferenceType(reference: ReferencePosition, refType: ReferenceType): void {
+        if (!(reference instanceof LocalReference)) {
+            throw new UsageError("changeReferenceType requires LocalReference");
+        }
+        if (refTypeIncludesFlag(reference, ReferenceType.Transient)) {
+            throw new UsageError("changeReferenceType called on TransientReference");
+        }
+        if (!refTypeIncludesFlag(refType, ReferenceType.SlideOnRemove)) {
+            throw new UsageError("changeReferenceType only support SlideOnRemove");
+        }
+        _validateReferenceType(refType);
+        reference.refType = refType;
+        if (refTypeIncludesFlag(refType, ReferenceType.SlideOnRemove)) {
+            this.mergeTree.slideReference(reference);
+        }
     }
 
     getPropertiesAtPosition(pos: number) {

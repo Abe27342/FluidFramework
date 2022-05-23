@@ -7,6 +7,7 @@
 
 import { assert, TypedEventEmitter } from "@fluidframework/common-utils";
 import { IEvent } from "@fluidframework/common-definitions";
+import { UsageError } from "@fluidframework/container-utils";
 import {
     addProperties,
     Client,
@@ -23,6 +24,7 @@ import {
     PropertySet,
     RedBlackTree,
     ReferenceType,
+    refTypeIncludesFlag,
     reservedRangeLabelsKey,
     UnassignedSequenceNumber,
 } from "@fluidframework/merge-tree";
@@ -42,7 +44,17 @@ const reservedIntervalIdKey = "intervalId";
 export enum IntervalType {
     Simple = 0x0,
     Nest = 0x1,
-    SlideOnRemove = 0x2,
+    /**
+     * SlideOnRemove indicates that the ends of the interval will slide if the segment
+     * they reference is removed and acked.
+     * See `packages\dds\merge-tree\REFERENCEPOSITIONS.md` for details
+     * SlideOnRemove is the default interval behavior and does not need to be specified.
+     */
+    SlideOnRemove = 0x2, // SlideOnRemove is default behavior - all intervals are SlideOnRemove
+    /**
+     * @internal
+     * A temporary interval, used internally
+     */
     Transient = 0x4,
 }
 
@@ -308,6 +320,7 @@ export class SequenceInterval implements ISerializableInterval {
             return;
         }
 
+        // TODO:ransomr ack on create for modified intervals;
         const newInterval =
             createSequenceInterval(label, startPos, endPos, this.start.getClient(), this.intervalType, op);
         if (this.properties) {
@@ -322,15 +335,23 @@ function createPositionReference(
     pos: number,
     refType: ReferenceType,
     op?: ISequencedDocumentMessage): LocalReference {
-    const segoff = client.getContainingSegment(pos, op);
-    if (segoff?.segment) {
-        const lref = new LocalReference(client, segoff.segment, segoff.offset, refType);
-        if (refType !== ReferenceType.Transient) {
-            client.addLocalReference(lref);
-        }
-        return lref;
+    let segoff;
+    if (op) {
+        assert((refType & ReferenceType.SlideOnRemove) !== 0, "op create references must be SlideOnRemove");
+        segoff = client.getSlideOnRemoveReferencePosition(pos, op);
+    } else {
+        assert((refType & ReferenceType.SlideOnRemove) === 0, "SlideOnRemove references must be op created");
+        segoff = client.getContainingSegment(pos);
     }
-    return new LocalReference(client, undefined);
+    if (segoff.segment) {
+        const ref = client.createLocalReferencePosition(segoff.segment, segoff.offset, refType, undefined);
+        return ref as LocalReference;
+    } else {
+        if (!refTypeIncludesFlag(refType, ReferenceType.Transient)) {
+            throw new UsageError("Non-transient references need segment");
+        }
+        return new LocalReference(client, undefined);
+    }
 }
 
 function createSequenceInterval(
@@ -338,22 +359,28 @@ function createSequenceInterval(
     start: number,
     end: number,
     client: Client,
-    intervalType: IntervalType,
+    intervalType?: IntervalType,
     op?: ISequencedDocumentMessage): SequenceInterval {
     let beginRefType = ReferenceType.RangeBegin;
     let endRefType = ReferenceType.RangeEnd;
-    if (intervalType === IntervalType.Nest) {
-        beginRefType = ReferenceType.NestBegin;
-        endRefType = ReferenceType.NestEnd;
-    } else if (intervalType === IntervalType.Transient) {
+    if (intervalType === IntervalType.Transient) {
         beginRefType = ReferenceType.Transient;
         endRefType = ReferenceType.Transient;
-    }
-
-    // TODO: Should SlideOnRemove be the default behavior?
-    if (intervalType & IntervalType.SlideOnRemove) {
-        beginRefType |= ReferenceType.SlideOnRemove;
-        endRefType |= ReferenceType.SlideOnRemove;
+    } else {
+        if (intervalType === IntervalType.Nest) {
+            beginRefType = ReferenceType.NestBegin;
+            endRefType = ReferenceType.NestEnd;
+        }
+        // All non-transient interval references must eventually be SlideOnRemove
+        // To ensure eventual consistency, they must start as StayOnRemove when
+        // pending (created locally and creation op is not acked)
+        if (op) {
+            beginRefType |= ReferenceType.SlideOnRemove;
+            endRefType |= ReferenceType.SlideOnRemove;
+        } else {
+            beginRefType |= ReferenceType.StayOnRemove;
+            endRefType |= ReferenceType.StayOnRemove;
+        }
     }
 
     const startLref = createPositionReference(client, start, beginRefType, op);
@@ -527,20 +554,19 @@ export class LocalIntervalCollection<TInterval extends ISerializableInterval> {
     }
 
     public findOverlappingIntervals(startPosition: number, endPosition: number) {
-        if (!this.intervalTree.intervals.isEmpty()) {
-            const transientInterval =
-                this.helpers.create(
-                    "transient",
-                    startPosition,
-                    endPosition,
-                    this.client,
-                    IntervalType.Transient);
-
-            const overlappingIntervalNodes = this.intervalTree.match(transientInterval);
-            return overlappingIntervalNodes.map((node) => node.key);
-        } else {
+        if (endPosition < startPosition || this.intervalTree.intervals.isEmpty()) {
             return [];
         }
+        const transientInterval =
+            this.helpers.create(
+                "transient",
+                startPosition,
+                endPosition,
+                this.client,
+                IntervalType.Transient);
+
+        const overlappingIntervalNodes = this.intervalTree.match(transientInterval);
+        return overlappingIntervalNodes.map((node) => node.key);
     }
 
     public previousInterval(pos: number) {
@@ -881,6 +907,14 @@ export class IntervalCollection<TInterval extends ISerializableInterval>
         return this.localCollection.getIntervalById(id);
     }
 
+    /**
+     * Create a new interval and add it to the collection
+     * @param start - interval start position
+     * @param end - interval end position
+     * @param intervalType - type of the interval. All intervals are SlideOnRemove. Intervals may not be Transient.
+     * @param props - properties of the interval
+     * @returns - the created interval
+     */
     public add(
         start: number,
         end: number,
@@ -889,6 +923,9 @@ export class IntervalCollection<TInterval extends ISerializableInterval>
     ) {
         if (!this.attached) {
             throw new Error("attach must be called prior to adding intervals");
+        }
+        if (intervalType & IntervalType.Transient) {
+            throw new Error("Can not add transient intervals");
         }
 
         const interval: TInterval = this.localCollection.addInterval(start, end, intervalType, props);
@@ -1078,6 +1115,7 @@ export class IntervalCollection<TInterval extends ISerializableInterval>
             // This is an ack from the server. Remove the pending change.
             this.removePendingChange(serializedInterval);
             const id: string = serializedInterval.properties[reservedIntervalIdKey];
+            // Could store the interval in the localOpMetadata to avoid the getIntervalById call
             interval = this.getIntervalById(id);
             if (interval) {
                 // Let the propertyManager prune its pending change-properties set.
@@ -1086,6 +1124,12 @@ export class IntervalCollection<TInterval extends ISerializableInterval>
                         type: MergeTreeDeltaType.ANNOTATE,
                         props: serializedInterval.properties,
                     });
+
+                // in current usage, interval is always a SequenceInterval
+                if (interval instanceof SequenceInterval) {
+                    this.ackReference(interval.start);
+                    this.ackReference(interval.end);
+                }
             }
         } else {
             // If there are pending changes with this ID, don't apply the remote start/end change, as the local ack
@@ -1167,6 +1211,16 @@ export class IntervalCollection<TInterval extends ISerializableInterval>
         return rebased;
     }
 
+    private ackReference(lref: LocalReference) {
+        if (!refTypeIncludesFlag(lref, ReferenceType.StayOnRemove)) {
+            return;
+        }
+        let refType = lref.refType;
+        refType = refType & ~ReferenceType.StayOnRemove;
+        refType = refType | ReferenceType.SlideOnRemove;
+        this.client.changeReferenceType(lref, refType);
+    }
+
     /** @deprecated - use ackAdd */
     public addInternal(
         serializedInterval: ISerializedInterval,
@@ -1181,8 +1235,16 @@ export class IntervalCollection<TInterval extends ISerializableInterval>
         local: boolean,
         op: ISequencedDocumentMessage) {
         if (local) {
-            // Local ops were applied when the message was created and there's no "pending add"
-            // state to bookkeep
+            const id: string = serializedInterval.properties[reservedIntervalIdKey];
+            // Could store the interval in the localOpMetadata to avoid the getIntervalById call
+            const localInterval = this.getIntervalById(id);
+            if (localInterval) {
+                // in current usage, interval is always a SequenceInterval
+                if (localInterval instanceof SequenceInterval) {
+                    this.ackReference(localInterval.start);
+                    this.ackReference(localInterval.end);
+                }
+            }
             return;
         }
 
