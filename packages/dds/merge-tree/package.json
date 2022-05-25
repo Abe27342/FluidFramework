@@ -137,7 +137,8 @@
       "ClassDeclaration_Marker": {"backCompat": false},
       "ClassDeclaration_MergeTree": {"forwardCompat": false},
       "EnumDeclaration_ReferenceType": {"backCompat": false},
-      "ClassDeclaration_SnapshotLegacy": {"forwardCompat": false}
+      "ClassDeclaration_SnapshotLegacy": {"forwardCompat": false},
+      "ClassDeclaration_IntervalTree": {"forwardCompat": false}
     }
   }
 }

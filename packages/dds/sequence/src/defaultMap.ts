@@ -173,7 +173,7 @@ export class DefaultMap<T> {
      * Get an iterator over the values in this map.
      * @returns The iterator
      */
-    public values(): IterableIterator<any> {
+    public values(): IterableIterator<T> {
         const localValuesIterator = this.data.values();
         const iterator = {
             next(): IteratorResult<any> {
@@ -196,7 +196,7 @@ export class DefaultMap<T> {
      * Get an iterator over the entries in this map.
      * @returns The iterator
      */
-    public [Symbol.iterator](): IterableIterator<[string, any]> {
+    public [Symbol.iterator](): IterableIterator<[string, T]> {
         return this.entries();
     }
 

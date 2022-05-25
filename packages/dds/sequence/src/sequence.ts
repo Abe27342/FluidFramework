@@ -226,6 +226,13 @@ export abstract class SharedSegmentSequence<T extends ISegment>
             (op, localOpMetadata) => this.submitLocalMessage(op, localOpMetadata),
             new SequenceIntervalCollectionValueType(),
         );
+
+        // TODO: Could make this more event-based.
+        this.client.mergeTreeSlideReferenceCallback = (previous, current) => {
+            for (const collection of this.intervalCollections.values()) {
+                collection.onReferenceSlide(previous, current);
+            }
+        }
     }
 
     /**

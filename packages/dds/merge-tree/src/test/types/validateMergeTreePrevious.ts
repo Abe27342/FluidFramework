@@ -1585,6 +1585,7 @@ declare function get_old_ClassDeclaration_IntervalTree():
 declare function use_current_ClassDeclaration_IntervalTree(
     use: TypeOnly<current.IntervalTree<any>>);
 use_current_ClassDeclaration_IntervalTree(
+    // @ts-expect-error compatibility expected to be broken
     get_old_ClassDeclaration_IntervalTree());
 
 /*

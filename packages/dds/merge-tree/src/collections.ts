@@ -8,6 +8,7 @@
 /* Remove once strictNullCheck is enabled */
 
 import { ISequencedDocumentMessage } from "@fluidframework/protocol-definitions";
+import { assert } from "console";
 import {
     ConflictAction,
     IIntegerRange,
@@ -891,6 +892,29 @@ export class IntervalTree<T extends IInterval> implements IRBAugmentation<T, Aug
             showStructure: true,
         };
         this.intervals.walk(actions);
+    }
+
+    public assertConsistent(): void {
+        const results = this.compareAllKeys();
+        assert(!results.slice(1).some((x) => x >= 0));
+        assert(results[0] === 0);
+    }
+
+    public compareAllKeys(): number[] {
+        let firstKey;
+        const compareResults: number[] = [];
+        const actions = <RBNodeActions<T, AugmentedIntervalNode>>{
+            infix: (node) => {
+                if (firstKey === undefined) {
+                    firstKey = node.key;
+                }
+                compareResults.push(intervalComparer(firstKey, node.key));
+                return true;
+            },
+            showStructure: true,
+        };
+        this.intervals.walk(actions);
+        return compareResults;
     }
 
     public mapUntil(fn: (X: T) => boolean) {

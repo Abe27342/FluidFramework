@@ -191,6 +191,8 @@ export class Client {
     // (undocumented)
     get mergeTreeMaintenanceCallback(): MergeTreeMaintenanceCallback | undefined;
     set mergeTreeMaintenanceCallback(callback: MergeTreeMaintenanceCallback | undefined);
+    // (undocumented)
+    set mergeTreeSlideReferenceCallback(callback: SlideReferenceCallback | undefined);
     peekPendingSegmentGroups(count?: number): SegmentGroup | SegmentGroup[] | undefined;
     posFromRelativePos(relativePos: IRelativePosition): number;
     rebasePosition(pos: number, seqNumberFrom: number, localSeq: number): number;
@@ -1096,6 +1098,8 @@ export class MergeTree {
     // @internal
     slideReference(ref: LocalReference): void;
     // (undocumented)
+    slideReferenceCallback?: SlideReferenceCallback;
+    // (undocumented)
     startCollaboration(localClientId: number, minSeq: number, currentSeq: number): void;
     // @internal
     updateSegmentRefsAfterMarkRemoved(segment: ISegment, pending: boolean): void;
@@ -1458,6 +1462,9 @@ export class SegmentGroupCollection {
     // (undocumented)
     get size(): number;
 }
+
+// @public (undocumented)
+export type SlideReferenceCallback = (previousValue: ReferencePosition, newValue: ReferencePosition) => void;
 
 // @public (undocumented)
 export class SnapshotLegacy {

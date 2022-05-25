@@ -238,12 +238,15 @@ function makeOperationGenerator(optionsParam?: OperationGenerationConfig): Gener
         return true;
     };
 
+    const and = <T>(...clauses: AcceptanceCondition<T>[]): AcceptanceCondition<T> =>
+        (t: T) => clauses.reduce<boolean>((prev, cond) => prev && cond(t), true);
+
     const clientBaseOperationGenerator = createWeightedGenerator<Operation, ClientOpState>([
         [addText, 2, isShorterThanMaxLength],
         [removeRange, 1, hasNonzeroLength],
-        [addInterval, 2, hasNotTooManyIntervals],
+        [addInterval, 2, and(hasNotTooManyIntervals, hasNonzeroLength)],
         [deleteInterval, 2, hasAnInterval],
-        [changeInterval, 2, hasAnInterval],
+        [changeInterval, 2, and(hasAnInterval, hasNonzeroLength)],
     ]);
 
     const clientOperationGenerator = (state: FuzzTestState) =>
@@ -292,8 +295,8 @@ function runIntervalCollectionFuzz(
                 );
                 for (const interval of intervals1) {
                     const otherInterval = collection2.getIntervalById(interval.getIntervalId());
-                    assert.equal(first.localRefToPos(interval.start), other.localRefToPos(otherInterval.start));
-                    assert.equal(first.localRefToPos(interval.end), other.localRefToPos(otherInterval.end));
+                    assert.equal(first.localRefToPos(interval.start), other.localRefToPos(otherInterval.start), `Startpoints of interval ${interval.getIntervalId()} different`);
+                    assert.equal(first.localRefToPos(interval.end), other.localRefToPos(otherInterval.end), `Endpoints of interval ${interval.getIntervalId()} different`);
                     assert.equal(interval.intervalType, otherInterval.intervalType);
                     assert.deepEqual(interval.properties, otherInterval.properties);
                 }
@@ -356,40 +359,48 @@ describe.skip("IntervalCollection fuzz testing", () => {
         }
     });
 
-    it("with default config", async () => {
-        const numClients = 3;
+    function runTests(seed: number): void {
+        it(`with default config, seed ${seed}`, async () => {
+            const numClients = 3;
 
-        const containerRuntimeFactory = new MockContainerRuntimeFactory();
-        const sharedStrings = Array.from({ length: numClients }, (_, index) => {
-            const dataStoreRuntime = new MockFluidDataStoreRuntime();
-            const sharedString = new SharedString(
-                dataStoreRuntime,
-                String.fromCharCode(index + 65),
-                SharedStringFactory.Attributes,
-            );
-            const containerRuntime = containerRuntimeFactory.createContainerRuntime(dataStoreRuntime);
-            const services: IChannelServices = {
-                deltaConnection: containerRuntime.createDeltaConnection(),
-                objectStorage: new MockStorage(),
+            const containerRuntimeFactory = new MockContainerRuntimeFactory();
+            const sharedStrings = Array.from({ length: numClients }, (_, index) => {
+                const dataStoreRuntime = new MockFluidDataStoreRuntime();
+                const sharedString = new SharedString(
+                    dataStoreRuntime,
+                    String.fromCharCode(index + 65),
+                    SharedStringFactory.Attributes,
+                );
+                const containerRuntime = containerRuntimeFactory.createContainerRuntime(dataStoreRuntime);
+                const services: IChannelServices = {
+                    deltaConnection: containerRuntime.createDeltaConnection(),
+                    objectStorage: new MockStorage(),
+                };
+
+                sharedString.initializeLocal();
+                sharedString.connect(services);
+                return sharedString;
+            });
+
+            const generator = take(30, makeOperationGenerator({ validateInterval: 10 }));
+
+            const initialState: FuzzTestState = {
+                sharedStrings,
+                containerRuntimeFactory,
+                random: makeRandom(seed),
             };
 
-            sharedString.initializeLocal();
-            sharedString.connect(services);
-            return sharedString;
+            runIntervalCollectionFuzz(
+                generator,
+                initialState,
+                { saveOnFailure: true, filepath: path.join(directory, `${seed}.json`) },
+            );
         });
+    }
 
-        const generator = take(300, makeOperationGenerator());
-
-        const initialState: FuzzTestState = {
-            sharedStrings,
-            containerRuntimeFactory,
-            random: makeRandom(0),
-        };
-
-        runIntervalCollectionFuzz(
-            generator,
-            initialState,
-            { saveOnFailure: true, filepath: path.join(directory, "0.json") },
-        );
-    });
+    // runTests(55);
+    const testCount = 100;
+    for (let i = 0; i < testCount; i++) {
+        runTests(i);
+    }
 });

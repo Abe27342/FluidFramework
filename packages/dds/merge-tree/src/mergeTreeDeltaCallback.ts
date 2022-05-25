@@ -11,6 +11,7 @@ import {
 } from "./ops";
 import { PropertySet } from "./properties";
 import { ISegment } from "./mergeTree";
+import { ReferencePosition } from "./referencePositions";
 
 export type MergeTreeDeltaOperationType =
     MergeTreeDeltaType.ANNOTATE | MergeTreeDeltaType.INSERT | MergeTreeDeltaType.REMOVE;
@@ -80,3 +81,6 @@ export interface IMergeTreeMaintenanceCallbackArgs extends IMergeTreeDeltaCallba
 
 export type MergeTreeMaintenanceCallback =
     (MaintenanceArgs: IMergeTreeMaintenanceCallbackArgs, opArgs: IMergeTreeDeltaOpArgs | undefined) => void;
+
+export type SlideReferenceCallback =
+    (previousValue: ReferencePosition | undefined, newValue: ReferencePosition | undefined) => void;

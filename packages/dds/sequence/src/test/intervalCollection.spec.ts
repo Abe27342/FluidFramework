@@ -605,6 +605,64 @@ describe("SharedString interval collections", () => {
             ]);
         });
 
+        describe("maintains consistency on slid intervals with pending changes", () => {
+            // This is a regression suite for an issue exposed by fuzz testing: IntervalCollection failed
+            // to remove LocalReferences that it created when the interval they corresponded to was either
+            // removed or changed. This would cause incorrect updates when those should-have-been-removed
+            // references slid in various scenarios.
+            // These regression tests help ensure
+
+            // TODO: Can maybe just be one test.
+
+            it("on change-before-remove operations", () => {
+                sharedString.insertText(0, "ABCDEF");
+                const collection1 = sharedString.getIntervalCollection("test");
+                const interval = collection1.add(1, 3, IntervalType.SlideOnRemove);
+                // sharedString2.insertText(0, "123");
+                collection1.change(interval.getIntervalId(), 4, 5);
+                sharedString.removeRange(1, 4);
+                // The idea here is that under expected conditions, client 1 shouldn't have
+                // to slide any intervals (the removed range is "BCD" and the interval is changed
+                // to "EF"). But if the interval collection doesn't clean up the old reference positions,
+                // the merge tree will slide them anyway and we'd end up with { start: 1, end: 2 }.
+                containerRuntimeFactory.processAllMessages();
+                assert.equal(sharedString.getText(), "AEF");
+                const collection2 = sharedString2.getIntervalCollection("test");
+                assertIntervals(sharedString, collection1, [ { start: 1, end: 2 }]);
+                assertIntervals(sharedString2, collection2, [ { start: 1, end: 2 }]);
+            });
+
+            it("when processing a remote change operation with a pending change to the same interval", () => {
+                sharedString.insertText(0, "ABCDEF");
+                const collection1 = sharedString.getIntervalCollection("test");
+                const collection2 = sharedString2.getIntervalCollection("test");
+                const interval = collection1.add(1, 3, IntervalType.SlideOnRemove);
+                containerRuntimeFactory.processAllMessages();
+                sharedString2.removeRange(2, 4);
+                collection2.change(interval.getIntervalId(), 1, 3);
+                collection1.change(interval.getIntervalId(), 5, 5);
+                collection2.change(interval.getIntervalId(), 0, 2);
+                // The ack of this operation would be problematic for client 2 if it attempted to remove
+                // the first client1 operations' references from its merge tree.
+                collection1.change(interval.getIntervalId(), 2, 4);
+                containerRuntimeFactory.processAllMessages();
+                assertIntervals(sharedString, collection1, [ { start: 2, end: 2 }]);
+                assertIntervals(sharedString2, collection2, [ { start: 2, end: 2 }]);
+            });
+        });
+
+        it("tolerates creation of an interval with no segment due to concurrent delete", () => {
+            sharedString.insertText(0, "ABCDEF");
+            const collection1 = sharedString.getIntervalCollection("test");
+            const collection2 = sharedString2.getIntervalCollection("test");
+            containerRuntimeFactory.processAllMessages();
+            sharedString2.removeRange(0, sharedString2.getLength());
+            collection1.add(1, 1, IntervalType.SlideOnRemove);
+            containerRuntimeFactory.processAllMessages();
+            assertIntervals(sharedString, collection1, [{ start: -1, end: -1 }]);
+            assertIntervals(sharedString2, collection2, [{ start: -1, end: -1 }]);
+        });
+
         it("ignores remote changes that would be overridden by multiple local ones", () => {
             // The idea of this test is to verify multiple pending local changes are tracked accurately.
             // No tracking at all of pending changes would cause collection 1 to see all 5 values: 0, 1, 2, 3, 4.
@@ -652,7 +710,7 @@ describe("SharedString interval collections", () => {
             ]);
         });
 
-        describe.skip("intervalCollection comparator consistency", () => {
+        describe("intervalCollection comparator consistency", () => {
             // This is a regression suite for an issue caught by fuzz testing:
             // if intervals A, B, C are created which initially compare A < B < C,
             // it's possible that string operations can change this order. Specifically,

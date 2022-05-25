@@ -31,6 +31,7 @@ import {
     MergeTreeDeltaCallback,
     MergeTreeMaintenanceCallback,
     MergeTreeMaintenanceType,
+    SlideReferenceCallback,
 } from "./mergeTreeDeltaCallback";
 import { TrackingGroupCollection } from "./mergeTreeTracking";
 import {
@@ -1033,6 +1034,7 @@ export class MergeTree {
     private minSeqListeners: Heap<MinListener> | undefined;
     public mergeTreeDeltaCallback?: MergeTreeDeltaCallback;
     public mergeTreeMaintenanceCallback?: MergeTreeMaintenanceCallback;
+    public slideReferenceCallback?: SlideReferenceCallback;
 
     // TODO: make and use interface describing options
     public constructor(public options?: PropertySet) {
@@ -1185,15 +1187,13 @@ export class MergeTree {
                             holdNodes.push(segment);
                         } else {
                             // Notify maintenance event observers that the segment is being unlinked from the MergeTree
-                            if (this.mergeTreeMaintenanceCallback) {
-                                this.mergeTreeMaintenanceCallback(
-                                    {
-                                        operation: MergeTreeMaintenanceType.UNLINK,
-                                        deltaSegments: [{ segment }],
-                                    },
-                                    undefined,
-                                );
-                            }
+                            this.mergeTreeMaintenanceCallback?.(
+                                {
+                                    operation: MergeTreeMaintenanceType.UNLINK,
+                                    deltaSegments: [{ segment }],
+                                },
+                                undefined,
+                            );
 
                             segment.parent = undefined;
                         }
@@ -1208,15 +1208,13 @@ export class MergeTree {
 
                             if (canAppend) {
                                 prevSegment!.append(segment);
-                                if (this.mergeTreeMaintenanceCallback) {
-                                    this.mergeTreeMaintenanceCallback(
-                                        {
-                                            operation: MergeTreeMaintenanceType.APPEND,
-                                            deltaSegments: [{ segment: prevSegment! }, { segment }],
-                                        },
-                                        undefined,
-                                    );
-                                }
+                                this.mergeTreeMaintenanceCallback?.(
+                                    {
+                                        operation: MergeTreeMaintenanceType.APPEND,
+                                        deltaSegments: [{ segment: prevSegment! }, { segment }],
+                                    },
+                                    undefined,
+                                );
                                 segment.parent = undefined;
                                 segment.trackingCollection.trackingGroups.forEach((tg) => tg.unlink(segment));
                             } else {
@@ -1480,26 +1478,47 @@ export class MergeTree {
             // We only slide the reference if the segment remove has been sequenced by the server
             return;
         }
+
+        // TODO: validate assumption
+        const previousValue = new LocalReference(
+            ref.getClient(),
+            ref.getSegment()!,
+            ref.offset,
+            ref.refType,
+            ref.properties,
+        );
+
         assert(!!segment.localRefs, "Ref not in the segment localRefs");
         const removedRef = segment.localRefs.removeLocalRef(ref);
         assert(ref === removedRef, "Ref not in the segment localRefs");
         const newSegoff = this.getSlideToSegment(segment);
         const newSegment = newSegoff.segment;
         if (!newSegment) {
+            const oldSegment = ref.getSegment()!;
+            const temp = oldSegment.localRefs!.createLocalRef(0, ReferenceType.Transient, ref.properties, ref.getClient());
+            (temp as any).segment = undefined;
+            // const temp = new LocalReference(ref.getClient(), undefined as any, 0, ReferenceType.Transient, ref.properties);
+            this.slideReferenceCallback?.(previousValue, temp);
             // No valid segments (all nodes removed or not yet created)
             ref.segment = undefined;
             ref.offset = 0;
+            this.slideReferenceCallback?.(temp, ref);
             return;
         }
         if (!newSegment.localRefs) {
             newSegment.localRefs = new LocalReferenceCollection(newSegment);
         }
+
+        const tempRef = newSegment.localRefs.createLocalRef(0, ReferenceType.Transient, ref.properties, ref.getClient());
+        this.slideReferenceCallback?.(previousValue, tempRef);
+
         ref.segment = newSegment;
         ref.offset = newSegoff.offset;
         newSegment.localRefs.addLocalRef(ref);
         // TODO is it required to update the path lengths?
         this.blockUpdatePathLengths(newSegment.parent, TreeMaintenanceSequenceNumber,
             LocalClientId);
+        this.slideReferenceCallback?.(tempRef, ref);
     }
 
     /**
@@ -1527,11 +1546,22 @@ export class MergeTree {
         for (const ref of refsToSlide) {
             this.slideReference(ref);
         }
+        const pendingSwaps: ({ regular: ReferencePosition, temp: ReferencePosition })[] = [];
+        for (const lref of refsToStay) {
+            const temp = segment.localRefs.createLocalRef(0, ReferenceType.Transient, lref.properties, lref.getClient());
+            pendingSwaps.push({ regular: lref, temp });
+            this.slideReferenceCallback?.(lref, temp);
+        }
+
         segment.localRefs.clear();
         for (const lref of refsToStay) {
             lref.segment = segment;
             lref.offset = 0;
             segment.localRefs.addLocalRef(lref);
+        }
+
+        for (const { regular, temp } of pendingSwaps) {
+            this.slideReferenceCallback?.(temp, regular);
         }
     }
 
@@ -2552,7 +2582,7 @@ export class MergeTree {
         client: Client,
     ): ReferencePosition {
         if (isRemoved(segment)) {
-            if (!refTypeIncludesFlag(refType, ReferenceType.SlideOnRemove)) {
+            if (!refTypeIncludesFlag(refType, ReferenceType.SlideOnRemove) && !refTypeIncludesFlag(refType, ReferenceType.Transient)) {
                 throw new UsageError("Can only create SlideOnRemove local reference position on a removed segment");
             }
             if (offset !== 0) {

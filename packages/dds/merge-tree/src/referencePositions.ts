@@ -3,6 +3,7 @@
  * Licensed under the MIT License.
  */
 
+// import { TypedEventEmitter } from "@fluidframework/common-utils";
 import { Stack } from "./collections";
 import { ISegment } from "./mergeTree";
 import { ReferenceType, ICombiningOp } from "./ops";
@@ -56,7 +57,20 @@ export function refHasRangeLabels(refPos: ReferencePosition): boolean {
     return refGetRangeLabels(refPos) !== undefined;
 }
 
-export interface ReferencePosition {
+/**
+ * TODO: doc. Rough idea: ReferencePositions need to be comparable to be placed in efficient data structures
+ * (i.e. tree for interval collection). Since they reference content that's mutable, the comparison between
+ * two reference positions might change over time. So anyone storing those values needs to update their bookkeeping
+ * when the position changes.
+ */
+export interface IReferencePositionEvents {
+    (event: "relativePositionChanged", listener: (
+        previous: ReferencePosition,
+        current: ReferencePosition
+    ) => void);
+}
+
+export interface ReferencePosition /* extends TypedEventEmitter<IReferencePositionEvents> */ {
     properties?: PropertySet;
     refType: ReferenceType;
 
@@ -114,7 +128,8 @@ export function compareReferencePositions(a: ReferencePosition, b: ReferencePosi
     const aSeg = a.getSegment();
     const bSeg = b.getSegment();
     if (aSeg === bSeg) {
-        return a.getOffset() - b.getOffset();
+        // TODO: remove obvious kludge
+        return (a as any).offset - (b as any).offset;
     } else {
         if (aSeg === undefined
             || (bSeg !== undefined &&
