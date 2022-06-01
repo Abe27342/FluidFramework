@@ -1445,7 +1445,7 @@ export class MergeTree {
             return true;
         });
         let offset = 0;
-        if (slideToSegment && !foundSegmentPastStart && !isRemoved(slideToSegment)) {
+        if (slideToSegment && !foundSegmentPastStart && !isRemovedAndAcked(slideToSegment) /* TODO: add regression test for. 3330 */) {
             // If slid nearer onto a non-removed segment, offset should be at the end of the segment
             offset = slideToSegment.cachedLength - 1;
         }
@@ -1461,10 +1461,10 @@ export class MergeTree {
             // Only slide is the segment is removed and acked
             segoff = this.getSlideToSegment(segoff.segment);
         }
-        if (segoff.segment && isRemoved(segoff.segment)) {
-            // All positions on removed segments must have offset 0
-            segoff.offset = 0;
-        }
+        // if (segoff.segment && isRemoved(segoff.segment)) {
+        //     // All positions on removed segments must have offset 0
+        //     segoff.offset = 0;
+        // }
         return segoff;
     }
 
@@ -1556,7 +1556,7 @@ export class MergeTree {
         segment.localRefs.clear();
         for (const lref of refsToStay) {
             lref.segment = segment;
-            lref.offset = 0;
+            // lref.offset = 0;
             segment.localRefs.addLocalRef(lref);
         }
 
@@ -2205,8 +2205,23 @@ export class MergeTree {
     };
 
     private ensureIntervalBoundary(pos: number, refSeq: number, clientId: number) {
+        let segIsLocal = false;
+        const checkSegmentIsLocal = (segment: ISegment, _pos: number, _refSeq: number, _clientId: number) => {
+            if (segment.seq === UnassignedSequenceNumber) {
+                segIsLocal = true;
+            }
+            // Only need to look at first segment that follows finished node
+            return false;
+        };
+
+        const continueFrom = (node: IMergeBlock) => {
+            segIsLocal = false;
+            this.rightExcursion(node, checkSegmentIsLocal);
+            return segIsLocal;
+        };
+
         const splitNode = this.insertingWalk(this.root, pos, refSeq, clientId, TreeMaintenanceSequenceNumber,
-            { leaf: this.splitLeafSegment });
+            { leaf: this.splitLeafSegment, continuePredicate: continueFrom });
         this.updateRoot(splitNode);
     }
 
@@ -2225,6 +2240,22 @@ export class MergeTree {
             }
             return false;
         } else {
+            if (pos === 0 /** or maybe whenever? */) {
+                // maybe need a TreeMaintenanceSeqNumber here?
+                const { parent } = node;
+                if (parent) {
+                    const childIndex = parent.children.indexOf(node);
+                    let nextNode = parent.children[childIndex + 1];
+                    while (nextNode && !nextNode.isLeaf()) {
+                        nextNode = nextNode.children[0];
+                    }
+
+                    if (nextNode && nextNode.seq === UnassignedSequenceNumber && toRemovalInfo(nextNode) !== undefined) {
+                        return true;
+                    }
+                    // TODO: look into rightExcursion things in inserting walk.. seems related.
+                }
+            }
             return true;
         }
     }
@@ -2585,9 +2616,9 @@ export class MergeTree {
             if (!refTypeIncludesFlag(refType, ReferenceType.SlideOnRemove) && !refTypeIncludesFlag(refType, ReferenceType.Transient)) {
                 throw new UsageError("Can only create SlideOnRemove local reference position on a removed segment");
             }
-            if (offset !== 0) {
-                throw new UsageError("Local reference position offset on removed segment must be 0");
-            }
+            // if (offset !== 0) {
+            //     throw new UsageError("Local reference position offset on removed segment must be 0");
+            // }
         }
         const localRefs = segment.localRefs ?? new LocalReferenceCollection(segment);
         segment.localRefs = localRefs;
@@ -2829,6 +2860,19 @@ export class MergeTree {
                 : this.walkAllSegments(child, action, accum);
         }
         return go;
+    }
+
+    public debugToString(): string[] {
+        const result: string[] = [];
+        this.walkAllSegments(this.root, (seg) => {
+            if (toRemovalInfo(seg) !== undefined) {
+                result.push(`(${(seg as any).text})`)
+            } else {
+                result.push((seg as any).text);
+            }
+            return true;
+        });
+        return result;
     }
 
     // Straight call every segment; goes until leaf action returns false

@@ -320,10 +320,10 @@ export class SequenceInterval implements ISerializableInterval {
         const startPos = start ?? this.start.toPosition();
         const endPos = end ?? this.end.toPosition();
 
-        if (this.start.toPosition() === startPos && this.end.toPosition() === endPos) {
-            // Return undefined to indicate that no change is necessary.
-            return;
-        }
+        // if (this.start.toPosition() === startPos && this.end.toPosition() === endPos && op === undefined /** lol */) {
+        //     // Return undefined to indicate that no change is necessary.
+        //     return;
+        // }
 
         // TODO:ransomr ack on create for modified intervals;
         const newInterval =

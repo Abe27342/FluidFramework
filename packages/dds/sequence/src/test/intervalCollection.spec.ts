@@ -191,6 +191,162 @@ describe("SharedString interval collections", () => {
             ]);
         });
 
+        it("can slide an interval on ack of remove", () => {
+            sharedString.insertText(0, "ABCD");
+            const collection1 = sharedString.getIntervalCollection("test");
+            containerRuntimeFactory.processAllMessages();
+            collection1.add(1, 2, IntervalType.SlideOnRemove);
+            sharedString2.insertText(2, "XY");
+            sharedString.removeRange(1, 3);
+            containerRuntimeFactory.processAllMessages();
+            const collection2 = sharedString2.getIntervalCollection("test");
+            assert.equal(sharedString.getText(), "AXYD");
+            assertIntervals(sharedString, collection1, [{ start: 1, end: 3 }]);
+            assertIntervals(sharedString2, collection2, [{ start: 1, end: 3 }]);
+        });
+
+        it.only("remains consistent when a change to the same position but different segment is issued", () => {
+            // This is a regression test for an issue in LocalIntervalCollection, which avoided actually modifying
+            // intervals on change operations if it perceived them to already have the same position. That logic was
+            // invalid in 2 ways:
+            // 1. for remote ops, the position requested for change potentially refers to a different revision from
+            //    the local position.
+            // 2. for local ops, even if an interval appears to be at the position it's being changed to, it might
+            //    actually be associated with a removed segment and pending slide. In this case, failing to update
+            //    the interval locally but still emitting a change op causes inconsistent behavior, since subsequent
+            //    slides may be to different segments (in this test, the danger is that the client issuing the change
+            //    op may end up with their interval pointing to the "Y" if they fail to change it locally)
+            sharedString.insertText(0, "ABCDE");
+            const collection1 = sharedString.getIntervalCollection("test");
+            containerRuntimeFactory.processAllMessages();
+            const interval = collection1.add(1, 3, IntervalType.SlideOnRemove);
+            sharedString2.insertText(2, "XY");
+            sharedString2.removeRange(1, 3);
+            sharedString.removeRange(1, 4);
+            collection1.change(interval.getIntervalId(), 1, 1);
+            containerRuntimeFactory.processAllMessages();
+            assert.equal(sharedString.getText(), "AYE");
+            assertIntervals(sharedString, collection1, [{ start: 2, end: 2 }]);
+            assertIntervals(sharedString2, sharedString2.getIntervalCollection("test"), [{ start: 2, end: 2 }]);
+            // const json = [
+            //     {
+            //         "type": "addText",
+            //         "index": 0,
+            //         "content": "aBPNz42GY3cJ-KH2PVfFH/",
+            //         "stringId": "B"
+            //     },
+            //     {
+            //         "type": "synchronize"
+            //     },
+            //     {
+            //         "type": "addInterval",
+            //         "start": 16,
+            //         "end": 20,
+            //         "collectionName": "comments",
+            //         "stringId": "B",
+            //         "id": "5b20ec3a-e380-4e38-b585-ef5876016c6d"
+            //     },
+            //     {
+            //         "type": "addText",
+            //         "index": 19,
+            //         "content": "q5VU3GJy",
+            //         "stringId": "A"
+            //     },
+            //     {
+            //         "type": "removeRange",
+            //         "start": 18,
+            //         "end": 24,
+            //         "stringId": "A"
+            //     },
+            //     {
+            //         "type": "removeRange",
+            //         "start": 1,
+            //         "end": 21,
+            //         "stringId": "B"
+            //     },
+            //     {
+            //         "type": "changeInterval",
+            //         "collectionName": "comments",
+            //         "id": "5b20ec3a-e380-4e38-b585-ef5876016c6d",
+            //         "start": 1,
+            //         "end": 1,
+            //         "stringId": "B"
+            //     },
+            //     {
+            //         "type": "synchronize"
+            //     }
+            // ]
+
+        });
+
+        it.only("remains consistent", () => {
+            // Create and connect a third SharedString.
+            const dataStoreRuntime3 = new MockFluidDataStoreRuntime();
+            const containerRuntime3 = containerRuntimeFactory.createContainerRuntime(dataStoreRuntime3);
+            const services3 = {
+                deltaConnection: containerRuntime3.createDeltaConnection(),
+                objectStorage: new MockStorage(),
+            };
+
+            const sharedString3 = new SharedString(dataStoreRuntime3, "shared-string-3", SharedStringFactory.Attributes);
+            sharedString3.initializeLocal();
+            sharedString3.connect(services3);
+
+            sharedString.insertText(0, "ABCDEF");
+            const collection1 = sharedString.getIntervalCollection("test");
+            containerRuntimeFactory.processAllMessages();
+
+            sharedString2.removeRange(4, 6);
+            collection1.add(2, 4, IntervalType.SlideOnRemove);
+            sharedString2.insertText(3, "XY");
+            sharedString3.removeRange(1, 4);
+            containerRuntimeFactory.processAllMessages();
+            assert.equal(sharedString.getText(), "AXY");
+            assertIntervals(sharedString, collection1, [{ start: 1, end: 2 }]);
+            assertIntervals(sharedString2, sharedString2.getIntervalCollection("test"), [{ start: 1, end: 2 }]);
+            assertIntervals(sharedString3, sharedString3.getIntervalCollection("test"), [{ start: 1, end: 2 }]);
+            // const json = [
+            //     {
+            //         "type": "addText",
+            //         "index": 0,
+            //         "content": "qYkQWWR4eaKG04Tlw-uk",
+            //         "stringId": "B"
+            //     },
+            //     {
+            //         "type": "synchronize"
+            //     },
+            //     {
+            //         "type": "removeRange",
+            //         "start": 17,
+            //         "end": 20,
+            //         "stringId": "A"
+            //     },
+            //     {
+            //         "type": "addInterval",
+            //         "start": 14,
+            //         "end": 17,
+            //         "collectionName": "comments",
+            //         "stringId": "B",
+            //         "id": "e6b4c739-d7eb-4d7e-bf67-bbf69dece12b"
+            //     },
+            //     {
+            //         "type": "addText",
+            //         "index": 15,
+            //         "content": "0Julo1v",
+            //         "stringId": "A"
+            //     },
+            //     {
+            //         "type": "removeRange",
+            //         "start": 8,
+            //         "end": 17,
+            //         "stringId": "C"
+            //     },
+            //     {
+            //         "type": "synchronize"
+            //     }
+            // ];
+        });
+
         it("can slide intervals nearer", () => {
             const collection1 = sharedString.getIntervalCollection("test");
             sharedString.insertText(0, "ABCD");

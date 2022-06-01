@@ -123,7 +123,7 @@
       "ClassDeclaration_SequenceEvent": {"forwardCompat": false, "backCompat": false},
       "ClassDeclaration_SequenceMaintenanceEvent": {"forwardCompat": false, "backCompat": false},
       "ClassDeclaration_IntervalCollection": {"forwardCompat": false},
-      "ClassDeclaration_SequenceInterval": {"backCompat": false},
+      "ClassDeclaration_SequenceInterval": {"backCompat": false, "forwardCompat": false},
       "TypeAliasDeclaration_SharedStringSegment": {"backCompat": false}
     }
   }

@@ -172,6 +172,10 @@ export class LocalReference implements ReferencePosition {
         return this.offset;
     }
 
+    public getOffsetHidden() {
+        return this.offset;
+    }
+
     public getProperties() {
         return this.properties;
     }
@@ -334,8 +338,9 @@ export class LocalReferenceCollection {
             !refTypeIncludesFlag(lref, ReferenceType.Transient),
             0x2df /* "transient references cannot be bound to segments" */);
         assertLocalReferences(lref);
-        const refsAtOffset = this.refsByOffset[lref.getOffset()] =
-            this.refsByOffset[lref.getOffset()]
+        const offset = lref.getOffsetHidden();
+        const refsAtOffset = this.refsByOffset[offset] =
+            this.refsByOffset[offset]
             ?? { at: ListMakeHead() };
         const atRefs = refsAtOffset.at =
             refsAtOffset.at
