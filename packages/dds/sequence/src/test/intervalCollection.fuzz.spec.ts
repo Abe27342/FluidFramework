@@ -260,11 +260,18 @@ function makeOperationGenerator(optionsParam?: OperationGenerationConfig): Gener
     );
 }
 
+interface LoggingInfo {
+    /** id of the interval to track over time */
+    intervalId: string;
+    /** Clients to print */
+    clientIds: string[];
+}
+
 function runIntervalCollectionFuzz(
     generator: Generator<Operation, FuzzTestState>,
     initialState: FuzzTestState,
     saveInfo?: SaveInfo,
-    loggingInfo?: { intervalId: string, clientIds: string[] }
+    loggingInfo?: LoggingInfo
 ): void {
     // Validates that all shared strings in the provided array are consistent in the underlying text
     // and location of all intervals in any interval collections they have.
@@ -318,31 +325,39 @@ function runIntervalCollectionFuzz(
         }
     }
 
+    function logCurrentState(state: FuzzTestState, loggingInfo: LoggingInfo): void {
+        for (const id of loggingInfo.clientIds) {
+            const sharedString = state.sharedStrings.filter(s => s.id === id)[0];
+            const labels = getUnscopedLabels(sharedString);
+            const interval = Array.from(labels)
+                .map((label) =>
+                    sharedString.getIntervalCollection(label).getIntervalById(loggingInfo.intervalId))
+                .find((interval) => interval !== undefined);
+
+            console.log(`Client ${id}:`);
+            if (interval !== undefined) {
+                const start = sharedString.localReferencePositionToPosition(interval.start);
+                const end = sharedString.localReferencePositionToPosition(interval.end);
+                if (end === start) {
+                    console.log(' '.repeat(start) + 'x');
+                } else {
+                    console.log(' '.repeat(start) + '[' + ' '.repeat(end - start - 1) + ']');
+                }
+            }
+            console.log(sharedString.getText());
+            console.log('\n');
+        }
+    }
+
     // Small wrapper to avoid having to return the same state repeatedly; all operations in this suite mutate.
     // Also a reasonable point to inject logging of incremental state.
     const statefully =
         <T>(statefulReducer: (state: FuzzTestState, operation: T) => void): Reducer<T, FuzzTestState> =>
             (state, operation) => {
                 if (loggingInfo !== undefined) {
-                    console.log("Operation to be applied:", JSON.stringify(operation, undefined, 4));
-                    for (const id of loggingInfo.clientIds) {
-                        const sharedString = state.sharedStrings.filter(s => s.id === id)[0];
-                        const collection = sharedString.getIntervalCollection("comments"); // TODO: bad assumption here
-                        const interval = collection.getIntervalById(loggingInfo.intervalId);
-                        console.log(`Client ${id}:`);
-                        if (interval !== undefined) {
-                            const start = sharedString.localReferencePositionToPosition(interval.start);
-                            const end = sharedString.localReferencePositionToPosition(interval.end);
-                            if (end === start) {
-                                console.log(' '.repeat(start) + 'x');
-                            } else {
-                                console.log(' '.repeat(start) + '[' + ' '.repeat(end - start - 1) + ']');
-                            }
-                        }
-                        console.log(sharedString.getText());
-                        console.log('\n');
-                    }
+                    logCurrentState(state, loggingInfo);
                     console.log('-'.repeat(20));
+                    console.log("Next operation:", JSON.stringify(operation, undefined, 4));
                 }
                 statefulReducer(state, operation);
                 return state;
@@ -388,14 +403,14 @@ const directory = path.join(__dirname, "../../src/test/results");
 
 // Once known issues with SharedInterval are fixed, a small set of fuzz tests with reasonably-tuned parameters
 // should be enabled.
-describe.only("IntervalCollection fuzz testing", () => {
+describe.skip("IntervalCollection fuzz testing", () => {
     before(() => {
         if (!existsSync(directory)) {
             mkdirSync(directory);
         }
     });
 
-    function runTests(seed: number, generatorArg?: Generator<Operation, FuzzTestState>): void {
+    function runTests(seed: number, generator: Generator<Operation, FuzzTestState>, loggingInfo?: LoggingInfo): void {
         it(`with default config, seed ${seed}`, async () => {
             const numClients = 3;
             const filepath = path.join(directory, `${seed}.json`);
@@ -419,8 +434,6 @@ describe.only("IntervalCollection fuzz testing", () => {
                 return sharedString;
             });
 
-            const generator = generatorArg ?? take(30, makeOperationGenerator({ validateInterval: 10 }));
-
             const initialState: FuzzTestState = {
                 sharedStrings,
                 containerRuntimeFactory,
@@ -431,16 +444,16 @@ describe.only("IntervalCollection fuzz testing", () => {
                 generator,
                 initialState,
                 { saveOnFailure: true, filepath },
-                { intervalId: "91d2ec3c-c120-4c12-8bfe-d8bf645acfd0", clientIds: ["A", "B", "C"] }
+                loggingInfo
             );
         });
     }
 
-    function replayTestFromFailureFile(seed: number) {
+    function replayTestFromFailureFile(seed: number, loggingInfo?: LoggingInfo) {
         const filepath = path.join(directory, `${seed}.json`);
-        let generator: Generator<Operation, FuzzTestState>
+        let operations: Operation[];
         try {
-            generator = generatorFromArray<any, any>(JSON.parse(readFileSync(filepath).toString()));
+            operations = JSON.parse(readFileSync(filepath).toString());
         } catch (err: any) {
             // Mocha executes skipped suite creation blocks, but whoever's running this suite only cares if
             // the containing block isn't skipped. Report the original error to them from inside a test.
@@ -453,102 +466,25 @@ describe.only("IntervalCollection fuzz testing", () => {
             throw err;
         }
 
+        const generator = generatorFromArray(operations);
         runTests(seed, generator);
     }
 
-    const testCount = 30000;
+    const testCount = 10;
     for (let i = 0; i < testCount; i++) {
-        runTests(i);
+        const generator = take(30, makeOperationGenerator({ validateInterval: 10 }));
+        runTests(i, generator);
     }
 
     // Change this seed and unskip the block to replay the actions from JSON on-disk.
     // This can be useful for quickly minimizing failure json while attempting to root cause.
-    describe.only("replay specific seed", () => {
-        const seedToReplay = 15605;
-        // const seedToReplay = 2536;
-        replayTestFromFailureFile(seedToReplay);
+    describe.skip("replay specific seed", () => {
+        const seedToReplay = 0;
+        replayTestFromFailureFile(
+            seedToReplay,
+            // The following line can be uncommented for useful logging output which tracks the provided
+            // intervalId over time.
+            // { intervalId: "", clientIds: ["A", "B", "C"] },
+        );
     })
-
-    // TODO: regression tests for:
-    /**
-     * 414, idea was bad skip "don't need to change interval" when comparison didn't take into account rebasing
-     * [
-    {
-        "type": "addText",
-        "index": 0,
-        "content": "ABCDEFGH",
-        "stringId": "B"
-    },
-    {
-        "type": "addText",
-        "index": 0,
-        "content": "XYZ",
-        "stringId": "A"
-    },
-    {
-        "type": "addInterval",
-        "start": 4,
-        "end": 4,
-        "collectionName": "comments",
-        "stringId": "B",
-        "id": "1c742683-c2ed-4c2e-bfa0-cffa40290474"
-    },
-    {
-        "type": "changeInterval",
-        "collectionName": "comments",
-        "id": "1c742683-c2ed-4c2e-bfa0-cffa40290474",
-        "start": 7,
-        "end": 7,
-        "stringId": "B"
-    },
-    {
-        "type": "synchronize"
-    }
-]
-
-3330, demonstrates why can't just use "isRemoved" on getSlideToSegment:
-
-[
-    {
-        "type": "addText",
-        "index": 0,
-        "content": "qYkQWWR4eaKG04Tlw-uk",
-        "stringId": "B"
-    },
-    {
-        "type": "synchronize"
-    },
-    {
-        "type": "removeRange",
-        "start": 17,
-        "end": 20,
-        "stringId": "A"
-    },
-    {
-        "type": "addInterval",
-        "start": 14,
-        "end": 17,
-        "collectionName": "comments",
-        "stringId": "B",
-        "id": "e6b4c739-d7eb-4d7e-bf67-bbf69dece12b"
-    },
-    {
-        "type": "addText",
-        "index": 15,
-        "content": "0Julo1v",
-        "stringId": "A"
-    },
-    {
-        "type": "removeRange",
-        "start": 8,
-        "end": 17,
-        "stringId": "C"
-    },
-    {
-        "type": "synchronize"
-    }
-]
-
-4956, demonstrates why even locally you can't trust that you don't need to apply a change op:
-     */
 });
