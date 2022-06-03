@@ -1286,7 +1286,7 @@ export class IntervalCollection<TInterval extends ISerializableInterval>
         const segoff = { segment: lref.segment, offset: lref.offset };
         const newSegoff = this.client.getSlideToSegment(segoff);
         const value: { segment: ISegment | undefined; offset: number | undefined; } | undefined
-            = (segoff === newSegoff) ? undefined : newSegoff;
+            = (segoff.segment === newSegoff.segment && segoff.offset === newSegoff.offset) ? undefined : newSegoff;
         return value;
     }
 
@@ -1310,14 +1310,19 @@ export class IntervalCollection<TInterval extends ISerializableInterval>
             "start and end must both be StayOnRemove");
         const newStart = this.getSlideToSegment(interval.start);
         const newEnd = this.getSlideToSegment(interval.end);
-        this.setSlideOnRemove(interval.start);
-        this.setSlideOnRemove(interval.end);
-
         // TODO: attempt to write regression test for pending change stuff.
         // Repro will probably require fine-grained op control since there isn't
         // anything that breaks eventual consistency with this behavior, but acking the
         // add when there's a pending change could cause jank on the local client.
         const id = interval.properties[reservedIntervalIdKey];
+        if (!this.hasPendingChangeStart(id)) {
+            this.setSlideOnRemove(interval.start);
+        }
+
+        if (!this.hasPendingChangeEnd(id)) {
+            this.setSlideOnRemove(interval.end);
+        }
+
         const needsStartUpdate = newStart && !this.hasPendingChangeStart(id);
         const needsEndUpdate = newEnd && !this.hasPendingChangeEnd(id);
 
