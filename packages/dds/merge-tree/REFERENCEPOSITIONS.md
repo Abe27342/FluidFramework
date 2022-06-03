@@ -1,10 +1,13 @@
 # ReferencePosition Documentation
 
-ReferencePositions are used to indicates a MergeTree position which is stable as operations are performed. There are two types:
+ReferencePositions are used to indicates a MergeTree position which is stable as operations are performed. There are two
+types:
+
 1. LocalReferences refer to a segment and offset within that segment
 2. Markers are actual segments in the Merge Tree
 
-The function `Client.localReferencePositionToPosition` returns the numerical position of a reference.
+The function `Client.localReferencePositionToPosition` returns the numerical position of a reference in the client's
+current view.
 
 ## LocalReference behavior on Remove
 
@@ -17,13 +20,15 @@ They are exclusive - a reference may be at most one of these types.
 
 The reference will slide to the next farthest segment when the segment is removed and the remove has been acknowledged.
 Sliding will look for the next valid segment.
-A valid segment is one whose creation has been acknowledge and either hasn't been removed
+A valid segment is one whose creation has been acknowledged and either hasn't been removed
 or the remove is pending (not acknowledged).
 If a farther segment is found, then the LocalReference will be changed to refer to that segment and have offset 0.
-This farther slide will not change the numerical position of the reference.
+In the event that the slide is happening on the acknowledgement of a remove, the slide to a farther segment will not
+change the numerical position of the reference.
 If there is no there is no valid segment farther in the tree, then the slide will place the reference on the last valid segment.
 The offset will be set to the last position in that segment.
-Sliding to a nearer segment does change the numerical position of the reference.
+In the event that the slide is happening on the acknowledgement of a remove, the reference would have been on the removed
+segment. This slide from the removed segment to a nearer segment does change the numerical position of the reference.
 If there is no valid position (all segments removed and acknowledged) then the reference is detached.
 
 ### StayOnRemove
@@ -69,10 +74,12 @@ To implement an operation which creates LocalReferences which will be have an ev
 
 1. Locally create the reference as StayOnRemove
 2. Send the reference numerical position in an op
-3. On acknowledgement, call `Client.changeReferenceType` to change the type of the reference to include
-SlideOnRemove
-4. Remote clients, on receiving the op, call `Client.getSlideOnRemoveReferencePosition` and use the result
-to create a SlideOnRemove reference with `Client.createLocalReferencePosition`
+3. On acknowledgement of the local create:
+   1. set the `refType` of the reference to include `SlideOnRemove`
+   2. call `Client.getSlideToSegment` with the references current segment and offset to get the proper new location
+   3. Delete the old reference and create a new one with the returned values
+4. Remote clients, on receiving the op, call `Client.getContainingSegment` followed by `Client.getSlideToSegment`
+on the result. Call `Client.createLocalReferencePosition` with the result to create a `SlideOnRemove` reference.
 
 ### Implementation Notes
 

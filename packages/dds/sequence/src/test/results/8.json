@@ -1,0 +1,140 @@
+[
+    {
+        "type": "addText",
+        "index": 0,
+        "content": "fA",
+        "stringId": "A"
+    },
+    {
+        "type": "addText",
+        "index": 0,
+        "content": "pDI7s",
+        "stringId": "B"
+    },
+    {
+        "type": "addText",
+        "index": 0,
+        "content": "1h7QPA",
+        "stringId": "C"
+    },
+    {
+        "type": "addText",
+        "index": 1,
+        "content": "9UrRpCBR",
+        "stringId": "A"
+    },
+    {
+        "type": "addInterval",
+        "start": 0,
+        "end": 4,
+        "collectionName": "comments",
+        "stringId": "B",
+        "id": "075afbdc-c81c-4c81-82df-802d4642aa2f"
+    },
+    {
+        "type": "deleteInterval",
+        "collectionName": "comments",
+        "id": "075afbdc-c81c-4c81-82df-802d4642aa2f",
+        "stringId": "B"
+    },
+    {
+        "type": "addInterval",
+        "start": 8,
+        "end": 9,
+        "collectionName": "comments",
+        "stringId": "A",
+        "id": "45284578-e4d9-4e4d-bfbc-1ffb10523e66"
+    },
+    {
+        "type": "addText",
+        "index": 1,
+        "content": "csM2w",
+        "stringId": "B"
+    },
+    {
+        "type": "addInterval",
+        "start": 2,
+        "end": 3,
+        "collectionName": "comments",
+        "stringId": "A",
+        "id": "39f60e86-a95f-4a95-8ca0-74ca957eb349"
+    },
+    {
+        "type": "addInterval",
+        "start": 1,
+        "end": 3,
+        "collectionName": "comments",
+        "stringId": "C",
+        "id": "302c12e6-d9aa-4d9a-b813-6b81401f933b"
+    },
+    {
+        "type": "synchronize"
+    },
+    {
+        "type": "removeRange",
+        "start": 4,
+        "end": 23,
+        "stringId": "B"
+    },
+    {
+        "type": "addText",
+        "index": 9,
+        "content": "03Pu4IxI",
+        "stringId": "C"
+    },
+    {
+        "type": "addText",
+        "index": 2,
+        "content": "",
+        "stringId": "B"
+    },
+    {
+        "type": "deleteInterval",
+        "collectionName": "comments",
+        "id": "302c12e6-d9aa-4d9a-b813-6b81401f933b",
+        "stringId": "A"
+    },
+    {
+        "type": "changeInterval",
+        "collectionName": "comments",
+        "id": "302c12e6-d9aa-4d9a-b813-6b81401f933b",
+        "start": 14,
+        "end": 14,
+        "stringId": "C"
+    },
+    {
+        "type": "addText",
+        "index": 23,
+        "content": "Npt6OW",
+        "stringId": "A"
+    },
+    {
+        "type": "addText",
+        "index": 4,
+        "content": "pCJGP",
+        "stringId": "B"
+    },
+    {
+        "type": "removeRange",
+        "start": 10,
+        "end": 20,
+        "stringId": "A"
+    },
+    {
+        "type": "deleteInterval",
+        "collectionName": "comments",
+        "id": "302c12e6-d9aa-4d9a-b813-6b81401f933b",
+        "stringId": "C"
+    },
+    {
+        "type": "addInterval",
+        "start": 21,
+        "end": 22,
+        "collectionName": "comments",
+        "stringId": "C",
+        "id": "3412a9a2-0b29-40b2-87ad-cc7a77d5cc96"
+    },
+    {
+        "type": "synchronize"
+    }
+]

@@ -19,6 +19,7 @@ import {
     IntervalConflictResolver,
     IntervalNode,
     IntervalTree,
+    ISegment,
     LocalReference,
     maxReferencePosition,
     MergeTreeDeltaType,
@@ -335,6 +336,22 @@ export class SequenceInterval implements ISerializableInterval {
     }
 }
 
+function createPositionReferenceFromSegoff(
+    client: Client,
+    segoff: { segment: ISegment | undefined; offset: number | undefined; },
+    refType: ReferenceType,
+    op?: ISequencedDocumentMessage): LocalReference {
+    if (segoff.segment) {
+        const ref = client.createLocalReferencePosition(segoff.segment, segoff.offset, refType, undefined);
+        return ref as LocalReference;
+    } else {
+        if (!op && !refTypeIncludesFlag(refType, ReferenceType.Transient)) {
+            throw new UsageError("Non-transient references need segment");
+        }
+        return new LocalReference(client, undefined, 0, refType);
+    }
+}
+
 function createPositionReference(
     client: Client,
     pos: number,
@@ -343,20 +360,13 @@ function createPositionReference(
     let segoff;
     if (op) {
         assert((refType & ReferenceType.SlideOnRemove) !== 0, "op create references must be SlideOnRemove");
-        segoff = client.getSlideOnRemoveReferencePosition(pos, op);
+        segoff = client.getContainingSegment(pos, op);
+        segoff = client.getSlideToSegment(segoff);
     } else {
         assert((refType & ReferenceType.SlideOnRemove) === 0, "SlideOnRemove references must be op created");
         segoff = client.getContainingSegment(pos);
     }
-    if (segoff.segment) {
-        const ref = client.createLocalReferencePosition(segoff.segment, segoff.offset, refType, undefined);
-        return ref as LocalReference;
-    } else {
-        if (op === undefined && !refTypeIncludesFlag(refType, ReferenceType.Transient)) {
-            throw new UsageError("Non-transient references need segment");
-        }
-        return new LocalReference(client, undefined);
-    }
+    return createPositionReferenceFromSegoff(client, segoff, refType, op);
 }
 
 function createSequenceInterval(
@@ -391,23 +401,21 @@ function createSequenceInterval(
 
     const startLref = createPositionReference(client, start, beginRefType, op);
     const endLref = createPositionReference(client, end, endRefType, op);
-    if (startLref && endLref) {
-        startLref.pairedRef = endLref;
-        endLref.pairedRef = startLref;
-        // TODO: Determine which of these properties are even used and stop serializing all of them
-        const rangeProp = {
-            [reservedRangeLabelsKey]: [label],
-            [reservedIntervalIdKey]: id,
-        };
-        startLref.addProperties(rangeProp);
-        endLref.addProperties(rangeProp);
-        // TODO cleanup
-        startLref.addProperties({ endpointType: "start" });
-        endLref.addProperties({ endpointType: "end" });
+    startLref.pairedRef = endLref;
+    endLref.pairedRef = startLref;
+    const rangeProp = {
+        [reservedRangeLabelsKey]: [label],
+        [reservedIntervalIdKey]: id,
+    };
+    startLref.addProperties(rangeProp);
+    endLref.addProperties(rangeProp);
+    // TODO cleanup
+    startLref.addProperties({ endpointType: "start" });
+    endLref.addProperties({ endpointType: "end" });
 
-        const ival = new SequenceInterval(startLref, endLref, intervalType, rangeProp);
-        return ival;
-    }
+
+    const ival = new SequenceInterval(startLref, endLref, intervalType, rangeProp);
+    return ival;
 }
 
 export function defaultIntervalConflictResolver(a: Interval, b: Interval) {
@@ -1165,22 +1173,6 @@ export class IntervalCollection<TInterval extends ISerializableInterval>
         return this.ackChange(serializedInterval, local, op);
     }
 
-    private ackIntervalReferences(interval: TInterval): void {
-        if (interval instanceof SequenceInterval) {
-            const id = interval.properties[reservedIntervalIdKey];
-            // TODO: attempt to write regression test for this.
-            // Repro will probably require fine-grained op control since there isn't
-            // anything that breaks eventual consistency with this behavior, but acking the
-            // add when there's a pending change could cause jank on the local client.
-            if (!this.hasPendingChangeStart(id)) {
-                this.ackReference(interval.start);
-            }
-            if (!this.hasPendingChangeEnd(id)) {
-                this.ackReference(interval.end);
-            }
-        }
-    }
-
     /** @internal */
     public ackChange(serializedInterval: ISerializedInterval, local: boolean, op: ISequencedDocumentMessage) {
         if (!this.attached) {
@@ -1203,8 +1195,7 @@ export class IntervalCollection<TInterval extends ISerializableInterval>
                         props: serializedInterval.properties,
                     });
 
-                // in current usage, interval is always a SequenceInterval
-                this.ackIntervalReferences(interval);
+                this.ackInterval(interval, op);
             }
         } else {
             // If there are pending changes with this ID, don't apply the remote start/end change, as the local ack
@@ -1291,14 +1282,63 @@ export class IntervalCollection<TInterval extends ISerializableInterval>
         return rebased;
     }
 
-    private ackReference(lref: LocalReference) {
-        if (!refTypeIncludesFlag(lref, ReferenceType.StayOnRemove)) {
-            return;
-        }
+    private getSlideToSegment(lref: LocalReference) {
+        const segoff = { segment: lref.segment, offset: lref.offset };
+        const newSegoff = this.client.getSlideToSegment(segoff);
+        const value: { segment: ISegment | undefined; offset: number | undefined; } | undefined
+            = (segoff === newSegoff) ? undefined : newSegoff;
+        return value;
+    }
+
+    private setSlideOnRemove(lref: LocalReference) {
         let refType = lref.refType;
         refType = refType & ~ReferenceType.StayOnRemove;
         refType = refType | ReferenceType.SlideOnRemove;
-        this.client.changeReferenceType(lref, refType);
+        lref.refType = refType;
+    }
+
+    private ackInterval(interval: TInterval, op: ISequencedDocumentMessage) {
+        // in current usage, interval is always a SequenceInterval
+        if (!(interval instanceof SequenceInterval)) {
+            return;
+        }
+
+        if (!refTypeIncludesFlag(interval.start, ReferenceType.StayOnRemove)) {
+            return;
+        }
+        assert(refTypeIncludesFlag(interval.end, ReferenceType.StayOnRemove),
+            "start and end must both be StayOnRemove");
+        const newStart = this.getSlideToSegment(interval.start);
+        const newEnd = this.getSlideToSegment(interval.end);
+        this.setSlideOnRemove(interval.start);
+        this.setSlideOnRemove(interval.end);
+
+        // TODO: attempt to write regression test for pending change stuff.
+        // Repro will probably require fine-grained op control since there isn't
+        // anything that breaks eventual consistency with this behavior, but acking the
+        // add when there's a pending change could cause jank on the local client.
+        const id = interval.properties[reservedIntervalIdKey];
+        const needsStartUpdate = !this.hasPendingChangeStart(id) &&
+            (newStart.segment !== interval.start.getSegment() || newStart.offset !== interval.start.offset);
+        const needsEndUpdate = !this.hasPendingChangeEnd(id) &&
+            (newEnd.segment !== interval.end.getSegment() || newEnd.offset !== interval.end.offset);
+
+        if (needsStartUpdate || needsEndUpdate) {
+            this.localCollection.removeExistingInterval(interval);
+            if (needsStartUpdate) {
+                const props = interval.start.properties;
+                this.client.removeLocalReferencePosition(interval.start);
+                interval.start = createPositionReferenceFromSegoff(this.client, newStart, interval.start.refType, op);
+                interval.start.addProperties(props);
+            }
+            if (needsEndUpdate) {
+                const props = interval.end.properties;
+                this.client.removeLocalReferencePosition(interval.end);
+                interval.end = createPositionReferenceFromSegoff(this.client, newEnd, interval.end.refType, op);
+                interval.end.addProperties(props);
+            }
+            this.localCollection.add(interval);
+        }
     }
 
     /** @deprecated - use ackAdd */
@@ -1319,8 +1359,7 @@ export class IntervalCollection<TInterval extends ISerializableInterval>
             // Could store the interval in the localOpMetadata to avoid the getIntervalById call
             const localInterval = this.getIntervalById(id);
             if (localInterval) {
-                // in current usage, interval is always a SequenceInterval
-                this.ackIntervalReferences(localInterval);
+                this.ackInterval(localInterval, op);
             }
             return;
         }
