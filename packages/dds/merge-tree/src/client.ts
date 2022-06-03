@@ -5,7 +5,6 @@
 
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 
-import { UsageError } from "@fluidframework/container-utils";
 import { IFluidHandle } from "@fluidframework/core-interfaces";
 import { IFluidSerializer } from "@fluidframework/shared-object-base";
 import { ISequencedDocumentMessage, MessageType } from "@fluidframework/protocol-definitions";
@@ -54,7 +53,7 @@ import { SnapshotLegacy } from "./snapshotlegacy";
 import { SnapshotLoader } from "./snapshotLoader";
 import { MergeTreeTextHelper } from "./textSegment";
 import { SnapshotV1 } from "./snapshotV1";
-import { ReferencePosition, RangeStackMap, DetachedReferencePosition, refTypeIncludesFlag } from "./referencePositions";
+import { ReferencePosition, RangeStackMap, DetachedReferencePosition } from "./referencePositions";
 import {
     IMergeTreeClientSequenceArgs,
     IMergeTreeDeltaOpArgs,

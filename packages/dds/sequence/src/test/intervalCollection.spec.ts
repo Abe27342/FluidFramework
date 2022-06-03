@@ -649,62 +649,6 @@ describe("SharedString interval collections", () => {
             ]);
         });
 
-        it("can slide intervals on remove before create", () => {
-            const collection1 = sharedString.getIntervalCollection("test");
-            sharedString.insertText(0, "ABCDE");
-            containerRuntimeFactory.processAllMessages();
-            const collection2 = sharedString2.getIntervalCollection("test");
-
-            sharedString.removeRange(1, 3);
-            assert.strictEqual(sharedString.getText(), "ADE");
-
-            // Remove location of end of interval
-            sharedString.removeRange(2, 3);
-            assert.equal(sharedString.getText(), "AB");
-            assertIntervals(sharedString, collection1, [
-                // odd behavior - end of interval doesn't slide
-                // until ack, so position beyond end of string
-                { start: 1, end: 2 },
-            ]);
-            containerRuntimeFactory.processAllMessages();
-            assertIntervals(sharedString, collection1, [
-                { start: 1, end: 1 },
-            ]);
-            assertIntervals(sharedString2, collection2, [
-                { start: 1, end: 1 },
-            ]);
-
-            // Remove location of start and end of interval
-            sharedString.removeRange(1, 2);
-            assertIntervals(sharedString, collection1, [
-                // odd behavior - start of interval doesn't slide
-                // until ack, so not found by overlapping search
-                { start: 1, end: 1 },
-            ], false);
-            containerRuntimeFactory.processAllMessages();
-            assertIntervals(sharedString, collection1, [
-                { start: 0, end: 0 },
-            ]);
-            assertIntervals(sharedString2, collection2, [
-                { start: 0, end: 0 },
-            ]);
-
-            // Interval on empty string
-            sharedString.removeRange(0, 1);
-            assertIntervals(sharedString, collection1, [
-                // Search finds interval at end of string
-                { start: 0, end: 0 },
-            ]);
-            containerRuntimeFactory.processAllMessages();
-            assertIntervals(sharedString, collection1, [
-                // Interval becomes detached when string is acked empty
-                { start: -1, end: -1 },
-            ], false);
-            assertIntervals(sharedString2, collection2, [
-                { start: -1, end: -1 },
-            ], false);
-        });
-
         it("can slide intervals nearer to locally removed segment", () => {
             const collection1 = sharedString.getIntervalCollection("test");
             sharedString.insertText(0, "ABCD");
@@ -920,44 +864,6 @@ describe("SharedString interval collections", () => {
             ]);
             assertIntervals(sharedString3, collection3, [
                 { start: 1, end: 2 },
-            ]);
-        });
-
-        it("can slide intervals on create before remove", () => {
-            const collection1 = sharedString.getIntervalCollection("test");
-            sharedString.insertText(0, "ABCD");
-            containerRuntimeFactory.processAllMessages();
-            const collection2 = sharedString2.getIntervalCollection("test");
-
-            collection2.add(2, 3, IntervalType.SlideOnRemove);
-
-            sharedString.removeRange(1, 3);
-
-            containerRuntimeFactory.processAllMessages();
-
-            // before fixing this, at this point the start range on sharedString
-            // is on the removed segment. Can't detect that from the interval API.
-            assertIntervals(sharedString2, collection2, [
-                { start: 1, end: 1 },
-            ]);
-            assertIntervals(sharedString, collection1, [
-                { start: 1, end: 1 },
-            ]);
-
-            // More operations reveal the problem
-            sharedString.insertText(2, "X");
-            assert.strictEqual(sharedString.getText(), "ADXE");
-            sharedString2.removeRange(1, 2);
-            assert.strictEqual(sharedString2.getText(), "AE");
-
-            containerRuntimeFactory.processAllMessages();
-            assert.strictEqual(sharedString.getText(), "AXE");
-
-            assertIntervals(sharedString2, collection2, [
-                { start: 1, end: 1 },
-            ]);
-            assertIntervals(sharedString, collection1, [
-                { start: 1, end: 1 },
             ]);
         });
 

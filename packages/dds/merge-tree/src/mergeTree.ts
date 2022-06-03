@@ -570,7 +570,6 @@ export abstract class BaseSegment extends MergeNode implements ISegment {
                 this.localRemovedSeq = undefined;
                 if (removalInfo.removedSeq === UnassignedSequenceNumber) {
                     removalInfo.removedSeq = opArgs.sequencedMessage!.sequenceNumber;
-                    mergeTree.updateSegmentRefsAfterMarkRemoved(this, false);
                     return true;
                 }
                 return false;

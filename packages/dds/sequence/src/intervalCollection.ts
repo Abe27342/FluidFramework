@@ -1318,10 +1318,8 @@ export class IntervalCollection<TInterval extends ISerializableInterval>
         // anything that breaks eventual consistency with this behavior, but acking the
         // add when there's a pending change could cause jank on the local client.
         const id = interval.properties[reservedIntervalIdKey];
-        const needsStartUpdate = !this.hasPendingChangeStart(id) &&
-            (newStart.segment !== interval.start.getSegment() || newStart.offset !== interval.start.offset);
-        const needsEndUpdate = !this.hasPendingChangeEnd(id) &&
-            (newEnd.segment !== interval.end.getSegment() || newEnd.offset !== interval.end.offset);
+        const needsStartUpdate = newStart && !this.hasPendingChangeStart(id);
+        const needsEndUpdate = newEnd && !this.hasPendingChangeEnd(id);
 
         if (needsStartUpdate || needsEndUpdate) {
             this.localCollection.removeExistingInterval(interval);
