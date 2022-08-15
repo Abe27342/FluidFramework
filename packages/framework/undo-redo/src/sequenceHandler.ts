@@ -13,7 +13,8 @@ import {
     ReferenceType,
     TrackingGroup,
 } from "@fluidframework/merge-tree";
-import { SequenceDeltaEvent, SharedSegmentSequence } from "@fluidframework/sequence";
+import { ISequencedDocumentMessage } from "@fluidframework/protocol-definitions";
+import { IntervalCollection, SequenceDeltaEvent, SequenceInterval, SharedSegmentSequence } from "@fluidframework/sequence";
 import { IRevertible, UndoRedoStackManager } from "./undoRedoStackManager";
 
 /**
@@ -24,16 +25,26 @@ export class SharedSegmentSequenceUndoRedoHandler {
     // eslint-disable-next-line max-len
     private readonly sequences = new Map<SharedSegmentSequence<ISegment>, SharedSegmentSequenceRevertible | undefined>();
 
+    private readonly collectionListenerUnbinds: (() => void)[] = [];
+
     constructor(private readonly stackManager: UndoRedoStackManager) {
         this.stackManager.on("changePushed", () => this.sequences.clear());
     }
 
     public attachSequence<T extends ISegment>(sequence: SharedSegmentSequence<T>) {
         sequence.on("sequenceDelta", this.sequenceDeltaHandler);
+        sequence.on("createIntervalCollection", this.intervalCollectionCreateHandler);
+        for (const label of sequence.getIntervalCollectionLabels()) {
+            const collection = sequence.getIntervalCollection(label);
+            this.attachCollectionListener(sequence, collection);
+        }
     }
 
     public detachSequence<T extends ISegment>(sequence: SharedSegmentSequence<T>) {
         sequence.removeListener("sequenceDelta", this.sequenceDeltaHandler);
+        sequence.removeListener("createIntervalCollection", this.intervalCollectionCreateHandler);
+        this.collectionListenerUnbinds.map(cb => cb());
+        this.collectionListenerUnbinds.length = 0;
     }
 
     private readonly sequenceDeltaHandler = (event: SequenceDeltaEvent, target: SharedSegmentSequence<ISegment>) => {
@@ -47,6 +58,36 @@ export class SharedSegmentSequenceUndoRedoHandler {
             revertible.add(event);
         }
     };
+
+    private readonly intervalCollectionCreateHandler = (label: string, _: boolean, target: SharedSegmentSequence<ISegment>) => {
+        const collection = target.getIntervalCollection(label);
+        this.attachCollectionListener(target, collection);
+    }
+
+    private attachCollectionListener(
+        sequence: SharedSegmentSequence<ISegment>,
+        collection: IntervalCollection<SequenceInterval>
+    ): void {
+        const handler = (
+            interval: SequenceInterval,
+            previousInterval: SequenceInterval,
+            local: boolean,
+        ) => {
+            if (local) {
+                const prevStart = sequence.localReferencePositionToPosition(previousInterval.start);
+                const prevEnd = sequence.localReferencePositionToPosition(previousInterval.end);
+                const id = interval.getIntervalId()!;
+                this.stackManager.pushToCurrentOperation({
+                    revert: () => {
+                        collection.change(id, prevStart, prevEnd);
+                    },
+                    discard: () => {}
+                });
+            }
+        }
+        collection.on("changeInterval", handler);
+        this.collectionListenerUnbinds.push(() => collection.off("changeInterval", handler));
+    }
 }
 
 interface ITrackedSharedSegmentSequenceRevertible {
