@@ -22,7 +22,7 @@ stages:
 - stage: publish_npm_internal_test
   dependsOn: build
   displayName: Publish Internal Test Packages
-  condition: and(succeeded(), eq(variables['testBuild'], true))
+  condition: and(succeeded(), eq(variables['testBuild'], false))
   jobs:
   - template: include-publish-npm-package-deployment.yml
     parameters:
@@ -37,7 +37,7 @@ stages:
 - stage: publish_npm_internal
   dependsOn: build
   displayName: Publish Internal Packages
-  condition: and(succeeded(), eq(variables['testBuild'], false))
+  condition: and(succeeded(), eq(variables['testBuild'], true))
   jobs:
   - template: include-publish-npm-package-deployment.yml
     parameters:
