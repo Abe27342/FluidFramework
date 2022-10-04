@@ -57,8 +57,8 @@ stages:
   - template: include-publish-npm-package-deployment.yml
     parameters:
       namespace: ${{ parameters.namespace }}
-      # internal/msinternal/example packages are deleted for official releases, but in case something goes wrong with that,
-      # using the `dev` registry is safe.
+      # internal/msinternal/example packages are deleted for official releases, but in case something goes wrong with
+      # that, using the `dev` registry is safe.
       devFeedName: https://pkgs.dev.azure.com/fluidframework/internal/_packaging/dev/npm/registry/
       feedName: https://registry.npmjs.org
       official: true
