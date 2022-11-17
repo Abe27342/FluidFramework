@@ -54,6 +54,9 @@
   },
   "typeValidation": {
     "version": "2.0.0-internal.2.1.0",
-    "broken": {}
+    "broken": {
+      "InterfaceDeclaration_IContainerRuntimeBase": {"forwardCompat": false},
+      "InterfaceDeclaration_IFluidDataStoreContextDetached": {"forwardCompat": false}
+    }
   }
 }

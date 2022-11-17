@@ -12,6 +12,7 @@ import { EventEmitter } from 'events';
 import { FluidDataStoreRegistryEntry } from '@fluidframework/runtime-definitions';
 import { FluidObject } from '@fluidframework/core-interfaces';
 import { FlushMode } from '@fluidframework/runtime-definitions';
+import { IAttributor } from '@fluidframework/runtime-definitions';
 import { IAudience } from '@fluidframework/container-definitions';
 import { IBatchMessage } from '@fluidframework/container-definitions';
 import { IClientDetails } from '@fluidframework/protocol-definitions';
@@ -79,6 +80,8 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
     addedGCOutboundReference(srcHandle: IFluidHandle, outboundHandle: IFluidHandle): void;
     // (undocumented)
     get attachState(): AttachState;
+    // (undocumented)
+    get attributor(): IAttributor | undefined;
     // (undocumented)
     get clientDetails(): IClientDetails;
     // (undocumented)

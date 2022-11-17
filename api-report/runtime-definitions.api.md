@@ -27,11 +27,20 @@ import { ISnapshotTree } from '@fluidframework/protocol-definitions';
 import { ISummaryTree } from '@fluidframework/protocol-definitions';
 import { ITelemetryBaseLogger } from '@fluidframework/common-definitions';
 import { ITree } from '@fluidframework/protocol-definitions';
+import { IUser } from '@fluidframework/protocol-definitions';
 import { SummaryTree } from '@fluidframework/protocol-definitions';
 import { TelemetryEventPropertyType } from '@fluidframework/common-definitions';
 
 // @public
 export type AliasResult = "Success" | "Conflict" | "AlreadyAliased";
+
+// @public (undocumented)
+export interface AttributionInfo {
+    // (undocumented)
+    timestamp: number;
+    // (undocumented)
+    user: IUser;
+}
 
 // @public @deprecated (undocumented)
 export enum BindState {
@@ -92,8 +101,20 @@ export interface IAttachMessage {
     type: string;
 }
 
+// @public (undocumented)
+export interface IAttributor {
+    // (undocumented)
+    entries(): IterableIterator<[number, AttributionInfo]>;
+    // (undocumented)
+    getAttributionInfo(key: number): AttributionInfo;
+    // (undocumented)
+    tryGetAttributionInfo(key: number): AttributionInfo | undefined;
+}
+
 // @public
 export interface IContainerRuntimeBase extends IEventProvider<IContainerRuntimeBaseEvents>, IProvideFluidHandleContext {
+    // (undocumented)
+    readonly attributor: IAttributor | undefined;
     // (undocumented)
     readonly clientDetails: IClientDetails;
     createDataStore(pkg: string | string[]): Promise<IDataStore>;

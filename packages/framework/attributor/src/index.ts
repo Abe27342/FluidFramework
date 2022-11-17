@@ -4,10 +4,13 @@
  */
 export {
 	Attributor,
-	AttributionInfo,
 	OpStreamAttributor,
-	IAttributor,
 } from "./attributor";
+export {
+	AttributorProvider,
+	IProvideAttributorProvider,
+	IAttributorProvider,
+} from "./attributorProvider";
 export {
 	AttributorSerializer,
 	chain,

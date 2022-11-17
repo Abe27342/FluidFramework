@@ -4,6 +4,10 @@
  */
 
 export {
+	IAttributor,
+	AttributionInfo
+} from "./attributor";
+export {
 	AliasResult,
 	BindState,
 	CreateChildSummarizerNodeFn,

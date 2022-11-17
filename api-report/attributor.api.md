@@ -4,17 +4,15 @@
 
 ```ts
 
-import { IFluidDataStoreRuntime } from '@fluidframework/datastore-definitions';
-import { IUser } from '@fluidframework/protocol-definitions';
+import { AttributionInfo } from '@fluidframework/runtime-definitions';
+import { IAttributor } from '@fluidframework/runtime-definitions';
+import { IAudience } from '@fluidframework/container-definitions';
+import { IDeltaManager } from '@fluidframework/container-definitions';
+import { IDocumentMessage } from '@fluidframework/protocol-definitions';
+import { ISequencedDocumentMessage } from '@fluidframework/protocol-definitions';
+import { ISnapshotTree } from '@fluidframework/protocol-definitions';
+import { ISummaryTreeWithStats } from '@fluidframework/runtime-definitions';
 import { Jsonable } from '@fluidframework/datastore-definitions';
-
-// @public (undocumented)
-export interface AttributionInfo {
-    // (undocumented)
-    timestamp: number;
-    // (undocumented)
-    user: IUser;
-}
 
 // @public (undocumented)
 export class Attributor implements IAttributor {
@@ -27,6 +25,16 @@ export class Attributor implements IAttributor {
     protected readonly keyToInfo: Map<number, AttributionInfo>;
     // (undocumented)
     tryGetAttributionInfo(key: number): AttributionInfo | undefined;
+}
+
+// @public (undocumented)
+export class AttributorProvider implements IProvideAttributorProvider {
+    // (undocumented)
+    get IAttributorProvider(): IAttributorProvider;
+    // (undocumented)
+    initialize(readAndParseBlob: (id: string) => Promise<string>, deltaManager: IDeltaManager<ISequencedDocumentMessage, IDocumentMessage>, audience: IAudience, snapshot?: ISnapshotTree): Promise<IAttributor & {
+        summarize: () => ISummaryTreeWithStats;
+    }>;
 }
 
 // @public (undocumented)
@@ -57,13 +65,11 @@ export interface Encoder<TDecoded, TEncoded> {
 }
 
 // @public (undocumented)
-export interface IAttributor {
+export interface IAttributorProvider extends IProvideAttributorProvider {
     // (undocumented)
-    entries(): IterableIterator<[number, AttributionInfo]>;
-    // (undocumented)
-    getAttributionInfo(key: number): AttributionInfo;
-    // (undocumented)
-    tryGetAttributionInfo(key: number): AttributionInfo | undefined;
+    initialize(readAndParseBlob: (id: string) => Promise<string>, deltaManager: IDeltaManager<ISequencedDocumentMessage, IDocumentMessage>, audience: IAudience, summary?: ISnapshotTree): Promise<IAttributor & {
+        summarize: () => ISummaryTreeWithStats;
+    }>;
 }
 
 // Warning: (ae-incompatible-release-tags) The symbol "IAttributorSerializer" is marked as @public, but its signature references "SerializedAttributor" which is marked as @internal
@@ -75,6 +81,12 @@ export type IAttributorSerializer = Encoder<IAttributor, SerializedAttributor>;
 export type InternedStringId = number & {
     readonly InternedStringId: "e221abc9-9d17-4493-8db0-70c871a1c27c";
 };
+
+// @public (undocumented)
+export interface IProvideAttributorProvider {
+    // (undocumented)
+    IAttributorProvider: IAttributorProvider;
+}
 
 // @public (undocumented)
 export function makeGzipEncoder<T>(): Encoder<Jsonable<T>, string>;
@@ -94,7 +106,7 @@ export class MutableStringInterner implements StringInterner {
 
 // @public (undocumented)
 export class OpStreamAttributor extends Attributor implements IAttributor {
-    constructor(runtime: IFluidDataStoreRuntime, initialEntries?: Iterable<[number, AttributionInfo]>);
+    constructor(deltaManager: IDeltaManager<ISequencedDocumentMessage, IDocumentMessage>, audience: IAudience, initialEntries?: Iterable<[number, AttributionInfo]>);
 }
 
 // @internal (undocumented)

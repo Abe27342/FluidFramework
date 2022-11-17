@@ -5,7 +5,7 @@
 
 import { strict as assert } from "assert";
 import { Container } from "@fluidframework/container-loader";
-import { Marker, ReferenceType, reservedMarkerIdKey } from "@fluidframework/merge-tree";
+import { ISegment, Marker, ReferenceType, reservedMarkerIdKey } from "@fluidframework/merge-tree";
 import { requestFluidObject } from "@fluidframework/runtime-utils";
 import { SharedString } from "@fluidframework/sequence";
 import {
@@ -15,16 +15,23 @@ import {
     ChannelFactoryRegistry,
     ITestFluidObject,
 } from "@fluidframework/test-utils";
-import { describeFullCompat } from "@fluidframework/test-version-utils";
+import { describeNoCompat } from "@fluidframework/test-version-utils";
+import { AttributorProvider } from "@fluid-internal/attributor";
 
 const stringId = "sharedStringKey";
 const registry: ChannelFactoryRegistry = [[stringId, SharedString.getFactory()]];
 const testContainerConfig: ITestContainerConfig = {
     fluidDataObjectType: DataObjectFactoryType.Test,
     registry,
+    loaderProps: {
+        scope: { IAttributorProvider: new AttributorProvider() },
+        options: {
+            trackAttribution: true
+        }
+    }
 };
 
-describeFullCompat("SharedString", (getTestObjectProvider) => {
+describeNoCompat("SharedString", (getTestObjectProvider) => {
     let provider: ITestObjectProvider;
     beforeEach(() => {
         provider = getTestObjectProvider();
@@ -33,13 +40,15 @@ describeFullCompat("SharedString", (getTestObjectProvider) => {
     let sharedString1: SharedString;
     let sharedString2: SharedString;
     let dataObject1: ITestFluidObject;
+    let container1: Container;
+    let container2: Container;
 
     beforeEach(async () => {
-        const container1 = await provider.makeTestContainer(testContainerConfig) as Container;
+        container1 = await provider.makeTestContainer(testContainerConfig) as Container;
         dataObject1 = await requestFluidObject<ITestFluidObject>(container1, "default");
         sharedString1 = await dataObject1.getSharedObject<SharedString>(stringId);
 
-        const container2 = await provider.loadTestContainer(testContainerConfig) as Container;
+        container2 = await provider.loadTestContainer(testContainerConfig) as Container;
         const dataObject2 = await requestFluidObject<ITestFluidObject>(container2, "default");
         sharedString2 = await dataObject2.getSharedObject<SharedString>(stringId);
     });
@@ -108,5 +117,43 @@ describeFullCompat("SharedString", (getTestObjectProvider) => {
         assert.equal(detachedString1.isAttached(), true, "detachedString1 should be attached");
         assert.equal(detachedString2.isAttached(), true, "detachedString2 should be attached");
         assert.equal(sharedString1.isAttached(), true, "sharedString1 should be attached");
+    });
+
+    it("stores attribution information", async () => {
+        sharedString1.insertText(0, " world");
+        sharedString2.insertText(0, "hello");
+        await provider.ensureSynchronized();
+
+        const getSegments = (str: SharedString): ISegment[] => {
+            const segs: ISegment[] = [];
+            str.walkSegments((seg) => {
+                segs.push(seg);
+                return true;
+            });
+            return segs;
+        };
+
+        const segments1 = getSegments(sharedString1);
+        assert.equal(segments1.length, 2);
+        const { attributor } = dataObject1.context.containerRuntime;
+        assert(attributor !== undefined);
+        const attributionInfos = segments1.map(
+            (seg) => {
+                const key = seg.attribution?.getAtOffset(0);
+                assert(key !== undefined);
+                return attributor.getAttributionInfo(key as number);
+            }
+        );
+
+        assert.deepEqual(attributionInfos.map(({ timestamp }) => typeof timestamp), ["number", "number"]);
+        assert.deepEqual(
+            attributionInfos.map(({ user }) => user.id),
+            [container1, container2].map((container) => {
+                const { clientId } = container;
+                if (clientId) {
+                    return dataObject1.runtime.getAudience().getMember(clientId)?.user.id;
+                }
+            })
+        );
     });
 });

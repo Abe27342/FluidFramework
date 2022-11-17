@@ -5,7 +5,7 @@
 import { assert } from "@fluidframework/common-utils";
 import { Jsonable } from "@fluidframework/datastore-definitions";
 import { IUser } from "@fluidframework/protocol-definitions";
-import { IAttributor, AttributionInfo } from "./attributor";
+import { IAttributor, AttributionInfo } from "@fluidframework/runtime-definitions";
 import { InternedStringId, MutableStringInterner } from "./stringInterner";
 
 export interface Encoder<TDecoded, TEncoded> {
