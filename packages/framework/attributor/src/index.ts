@@ -10,6 +10,7 @@ export {
 	AttributorProvider,
 	IProvideAttributorProvider,
 	IAttributorProvider,
+	mixinAttributor,
 } from "./attributorProvider";
 export {
 	AttributorSerializer,

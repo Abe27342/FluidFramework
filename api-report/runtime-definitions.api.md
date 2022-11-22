@@ -114,8 +114,6 @@ export interface IAttributor {
 // @public
 export interface IContainerRuntimeBase extends IEventProvider<IContainerRuntimeBaseEvents>, IProvideFluidHandleContext {
     // (undocumented)
-    readonly attributor: IAttributor | undefined;
-    // (undocumented)
     readonly clientDetails: IClientDetails;
     createDataStore(pkg: string | string[]): Promise<IDataStore>;
     // @internal @deprecated (undocumented)

@@ -119,7 +119,7 @@ describeNoCompat("SharedString", (getTestObjectProvider) => {
         assert.equal(sharedString1.isAttached(), true, "sharedString1 should be attached");
     });
 
-    it("stores attribution information", async () => {
+    it.only("stores attribution information", async () => {
         sharedString1.insertText(0, " world");
         sharedString2.insertText(0, "hello");
         await provider.ensureSynchronized();
@@ -135,7 +135,7 @@ describeNoCompat("SharedString", (getTestObjectProvider) => {
 
         const segments1 = getSegments(sharedString1);
         assert.equal(segments1.length, 2);
-        const { attributor } = dataObject1.context.containerRuntime;
+        const { attributor } = dataObject1.context.containerRuntime as any;
         assert(attributor !== undefined);
         const attributionInfos = segments1.map(
             (seg) => {

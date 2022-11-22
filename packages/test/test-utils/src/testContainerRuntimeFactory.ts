@@ -16,6 +16,7 @@ import {
     RuntimeRequestHandler } from "@fluidframework/request-handler";
 import { IFluidDataStoreFactory } from "@fluidframework/runtime-definitions";
 import { RuntimeFactoryHelper } from "@fluidframework/runtime-utils";
+import { mixinAttributor } from "@fluid-internal/attributor";
 
 /**
  * Create a container runtime factory class that allows you to set runtime options
@@ -79,4 +80,4 @@ export const createTestContainerRuntimeFactory = (containerRuntimeCtor: typeof C
 /**
  * A container runtime factory that allows you to set runtime options
  */
-export const TestContainerRuntimeFactory = createTestContainerRuntimeFactory(ContainerRuntime);
+export const TestContainerRuntimeFactory = createTestContainerRuntimeFactory(mixinAttributor(ContainerRuntime));

@@ -73,7 +73,6 @@ import {
 import {
     FlushMode,
     InboundAttachMessage,
-    IAttributor,
     IFluidDataStoreContextDetached,
     IFluidDataStoreRegistry,
     IFluidDataStoreChannel,
@@ -110,7 +109,6 @@ import {
 import { GCDataBuilder, trimLeadingAndTrailingSlashes } from "@fluidframework/garbage-collector";
 import { v4 as uuid } from "uuid";
 import { compress, decompress } from "lz4js";
-import type { IProvideAttributorProvider } from "@fluid-internal/attributor";
 import { ContainerFluidHandleContext } from "./containerHandleContext";
 import { FluidDataStoreRegistry } from "./dataStoreRegistry";
 import { Summarizer } from "./summarizer";
@@ -540,10 +538,6 @@ interface IPendingRuntimeState {
 
 const maxConsecutiveReconnectsKey = "Fluid.ContainerRuntime.MaxConsecutiveReconnects";
 
-// The key for the attributor tree in summary.
-// TODO: Consider where to put this.
-const attributorKey = "attributor";
-
 const defaultFlushMode = FlushMode.TurnBased;
 
 // The actual limit is 1Mb (socket.io and Kafka limits)
@@ -654,6 +648,8 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
      * @param requestHandler - Request handlers for the container runtime
      * @param runtimeOptions - Additional options to be passed to the runtime
      * @param existing - (optional) When loading from an existing snapshot. Precedes context.existing if provided
+     * @param containerRuntimeCtor - (optional) Constructor to use to create the ContainerRuntime instance. This
+     * allows mixin classes to leverage this method to define their own async initializer.
      */
     public static async load(
         context: IContainerContext,
@@ -662,6 +658,7 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
         runtimeOptions: IContainerRuntimeOptions = {},
         containerScope: FluidObject = context.scope,
         existing?: boolean,
+        containerRuntimeCtor: typeof ContainerRuntime = ContainerRuntime
     ): Promise<ContainerRuntime> {
         // If taggedLogger exists, use it. Otherwise, wrap the vanilla logger:
         // back-compat: Remove the TaggedLoggerAdapter fallback once all the host are using loader > 0.45
@@ -746,15 +743,7 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
             }
         }
 
-        const attributorProvider: FluidObject<IProvideAttributorProvider> = containerScope;
-        const attributor = context.audience ? await attributorProvider.IAttributorProvider?.initialize(
-            tryFetchBlobById,
-            context.deltaManager,
-            context.audience,
-            baseSnapshot?.trees[attributorKey]
-        ) : undefined;
-
-        const runtime = new ContainerRuntime(
+        const runtime = new containerRuntimeCtor(
             context,
             registry,
             metadata,
@@ -776,7 +765,6 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
             blobManagerSnapshot,
             storage,
             requestHandler,
-            attributor
         );
 
         if (pendingRuntimeState) {
@@ -992,10 +980,6 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
             : 0;
     }
 
-    public get attributor(): IAttributor | undefined {
-        return this._attributor;
-    }
-
     private readonly createContainerMetadata: ICreateContainerMetadata;
     /**
      * The summary number of the next summary that will be generated for this container. This is incremented every time
@@ -1003,7 +987,7 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
      */
     private nextSummaryNumber: number;
 
-    private constructor(
+    protected constructor(
         private readonly context: IContainerContext,
         private readonly registry: IFluidDataStoreRegistry,
         metadata: IContainerRuntimeMetadata | undefined,
@@ -1017,7 +1001,6 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
         blobManagerSnapshot: IBlobManagerLoadInfo,
         private readonly _storage: IDocumentStorageService,
         private readonly requestHandler?: (request: IRequest, runtime: IContainerRuntime) => Promise<IResponse>,
-        private readonly _attributor?: (IAttributor & { summarize: () => ISummaryTreeWithStats; }) | undefined,
         private readonly summaryConfiguration: ISummaryConfiguration = {
             // the defaults
             ...DefaultSummaryConfiguration,
@@ -1489,7 +1472,7 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
         addBlobToSummary(summaryTree, metadataBlobName, JSON.stringify(metadata));
     }
 
-    private addContainerStateToSummary(
+    protected addContainerStateToSummary(
         summaryTree: ISummaryTreeWithStats,
         fullTree: boolean,
         trackState: boolean,
@@ -1522,11 +1505,6 @@ export class ContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents>
         const gcSummary = this.garbageCollector.summarize(fullTree, trackState, telemetryContext);
         if (gcSummary !== undefined) {
             addSummarizeResultToSummary(summaryTree, gcTreeKey, gcSummary);
-        }
-
-        const attributorSummary = this._attributor?.summarize();
-        if (attributorSummary) {
-            addSummarizeResultToSummary(summaryTree, attributorKey, attributorSummary);
         }
     }
 

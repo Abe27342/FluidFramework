@@ -40,7 +40,6 @@ import {
     ITelemetryContext,
     SummarizeInternalFn,
 } from "./summary";
-import { IAttributor } from "./attributor";
 
 /**
  * Runtime flush mode handling
@@ -194,8 +193,6 @@ export interface IContainerRuntimeBase extends
      * Returns the current audience.
      */
     getAudience(): IAudience;
-
-    readonly attributor: IAttributor | undefined;
 }
 
 /** @deprecated - Used only in deprecated API bindToContext */
