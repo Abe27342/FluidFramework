@@ -46,7 +46,8 @@ describe("insertion perf", () => {
 		},
 	});
 
-	const startTree = constructTree(1000);
+	let startTree = constructTree(1000);
+	let iterationCount = 0;
 	benchmark({
 		type: BenchmarkType.Measurement,
 		title: "insert at start of large tree",
@@ -61,7 +62,14 @@ describe("insertion perf", () => {
 				props: undefined,
 				opArgs: { op: { type: MergeTreeDeltaType.INSERT } },
 			});
+			iterationCount++;
 		},
+		onCycle: () => {
+			console.log(iterationCount);
+			iterationCount = 0;
+			startTree = constructTree(1000);
+		},
+		only: true,
 	});
 
 	const middleTree = constructTree(1000);
