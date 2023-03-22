@@ -822,23 +822,45 @@ export class MergeTree {
 		if (!segment || !isRemovedAndAcked(segment)) {
 			return segment;
 		}
+		const cachedVal = this.cachedSlideDestination!.segmentToSlideDestination.get(segment);
+		if (cachedVal !== undefined) {
+			return cachedVal === "detached" ? undefined : cachedVal;
+		}
+		const segmentsWithSlidDst = new Set<ISegment>();
 		let slideToSegment: ISegment | undefined;
 		const goFurtherToFindSlideToSegment = (seg) => {
 			if (seg.seq !== UnassignedSequenceNumber && !isRemovedAndAcked(seg)) {
 				slideToSegment = seg;
 				return false;
 			}
+			segmentsWithSlidDst.add(seg);
 			return true;
 		};
 		// Slide to the next farthest valid segment in the tree.
 		forwardExcursion(segment, goFurtherToFindSlideToSegment);
 		if (slideToSegment) {
+			for (const seg of segmentsWithSlidDst) {
+				this.cachedSlideDestination!.segmentToSlideDestination.set(seg, slideToSegment);
+			}
 			return slideToSegment;
 		}
 		// If no such segment is found, slide to the last valid segment.
 		backwardExcursion(segment, goFurtherToFindSlideToSegment);
+		for (const seg of segmentsWithSlidDst) {
+			this.cachedSlideDestination!.segmentToSlideDestination.set(
+				seg,
+				slideToSegment ?? "detached",
+			);
+		}
 		return slideToSegment;
 	}
+
+	private cachedSlideDestination:
+		| {
+				segmentToSlideDestination: Map<ISegment, ISegment | "detached">;
+				seq: number;
+		  }
+		| undefined;
 
 	/**
 	 * This method should only be called when the current client sequence number is
@@ -853,6 +875,12 @@ export class MergeTree {
 		);
 		if (segment.localRefs?.empty !== false) {
 			return;
+		}
+		if (this.cachedSlideDestination?.seq !== segment.removedSeq) {
+			this.cachedSlideDestination = {
+				segmentToSlideDestination: new Map<ISegment, ISegment>(),
+				seq: segment.removedSeq ?? UnassignedSequenceNumber, // TODO: default case here should never happen.
+			};
 		}
 		const newSegment = this._getSlideToSegment(segment);
 		if (newSegment) {
@@ -1290,10 +1318,6 @@ export class MergeTree {
 			pendingSegmentGroup.segments.map((pendingSegment) => {
 				const overlappingRemove = !pendingSegment.ack(pendingSegmentGroup, opArgs);
 				overwrite = overlappingRemove || overwrite;
-
-				if (!overlappingRemove && opArgs.op.type === MergeTreeDeltaType.REMOVE) {
-					this.slideAckedRemovedSegmentReferences(pendingSegment);
-				}
 				if (MergeTree.options.zamboniSegments) {
 					this.addToLRUSet(pendingSegment, seq);
 				}
@@ -1304,6 +1328,14 @@ export class MergeTree {
 					segment: pendingSegment,
 				});
 			});
+			if (opArgs.op.type === MergeTreeDeltaType.REMOVE) {
+				// Do this after acking all removals so that slide destination is final
+				// (doing it as we go will move references to each intermediate segment for a removal
+				// that removes multiple segments)
+				pendingSegmentGroup.segments.map((pendingSegment) => {
+					this.slideAckedRemovedSegmentReferences(pendingSegment);
+				});
+			}
 			this.mergeTreeMaintenanceCallback?.(
 				{
 					deltaSegments,
@@ -2294,6 +2326,7 @@ export class MergeTree {
 			for (const group of trackingCollection.trackingGroups) {
 				trackingCollection.unlink(group);
 			}
+			// TODO: this should probably also be updating tracked refs..
 		}
 
 		for (let i = 0; i < newOrder.length; i++) {

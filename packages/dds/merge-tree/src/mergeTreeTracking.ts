@@ -5,15 +5,15 @@
 
 import { LocalReferencePosition } from "./localReference";
 import { ISegment } from "./mergeTreeNodes";
-import { SortedSegmentSet } from "./sortedSegmentSet";
+// import { SortedSegmentSet } from "./sortedSegmentSet";
 
 export type Trackable = ISegment | LocalReferencePosition;
 
 export class TrackingGroup {
-	private readonly trackedSet: SortedSegmentSet<Trackable>;
+	private readonly trackedSet: Set<Trackable>;
 
 	constructor() {
-		this.trackedSet = new SortedSegmentSet<Trackable>();
+		this.trackedSet = new Set<Trackable>();
 	}
 
 	/**
@@ -22,12 +22,14 @@ export class TrackingGroup {
 	 * which may not match the intention
 	 */
 	public get segments(): readonly ISegment[] {
+		return Array.from(this.trackedSet.keys(), (v) => (v.isLeaf() ? v : v.getSegment()!));
 		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-		return this.trackedSet.items.map((v) => (v.isLeaf() ? v : v.getSegment()!));
-	}
+		// return this.trackedSet.items.map((v) => (v.isLeaf() ? v : v.getSegment()!));
+	} // look into if clients assume sorted
 
 	public get tracked(): readonly Trackable[] {
-		return this.trackedSet.items;
+		return Array.from(this.trackedSet);
+		// return this.trackedSet.items;
 	}
 
 	public get size(): number {
@@ -40,13 +42,15 @@ export class TrackingGroup {
 
 	public link(trackable: Trackable) {
 		if (!this.trackedSet.has(trackable)) {
-			this.trackedSet.addOrUpdate(trackable);
+			this.trackedSet.add(trackable);
+			// this.trackedSet.addOrUpdate(trackable);
 			trackable.trackingCollection.link(this);
 		}
 	}
 
 	public unlink(trackable: Trackable) {
-		if (this.trackedSet.remove(trackable)) {
+		if (this.trackedSet.delete(trackable)) {
+			// if (this.trackedSet.remove(trackable)) {
 			trackable.trackingCollection.unlink(this);
 			return true;
 		}
