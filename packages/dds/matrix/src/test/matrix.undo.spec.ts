@@ -688,9 +688,7 @@ describe("Matrix", () => {
 				await expect([["c1"]]);
 
 				undo1.undoOperation();
-				// this is wrong, why is the value in current row changed.
-				// AB#4195
-				await expect([["c0"]]);
+				await expect([["c1"]]);
 			});
 
 			it("undo of cell in remotely removed last row", async () => {
@@ -726,9 +724,7 @@ describe("Matrix", () => {
 				await expect([["r1"]]);
 
 				undo1.undoOperation();
-				// this is wrong, why is the value in current row changed.
-				// AB#4195
-				await expect([["r0"]]);
+				await expect([["r1"]]);
 			});
 
 			it("undo of inserted and remotely removed column", async () => {

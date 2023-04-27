@@ -19,7 +19,7 @@ import { LoggingError } from "@fluidframework/telemetry-utils";
 import { UsageError } from "@fluidframework/container-utils";
 import { IIntegerRange } from "./base";
 import { RedBlackTree } from "./collections";
-import { UnassignedSequenceNumber, UniversalSequenceNumber } from "./constants";
+import { LocalClientId, UnassignedSequenceNumber, UniversalSequenceNumber } from "./constants";
 import { LocalReferencePosition } from "./localReference";
 import {
 	CollaborationWindow,
@@ -95,6 +95,8 @@ export interface IClientEvents {
 	);
 }
 
+const LongLocalClientId = "original";
+
 export class Client extends TypedEventEmitter<IClientEvents> {
 	public longClientId: string | undefined;
 
@@ -118,6 +120,7 @@ export class Client extends TypedEventEmitter<IClientEvents> {
 		this._mergeTree.mergeTreeMaintenanceCallback = (args, opArgs) => {
 			this.emit("maintenance", args, opArgs, this);
 		};
+		this.clientNameToIds.put(LongLocalClientId, LocalClientId);
 
 		if (options?.attribution?.track) {
 			const policy = this._mergeTree?.attributionPolicy;
@@ -680,7 +683,7 @@ export class Client extends TypedEventEmitter<IClientEvents> {
 		return this.clientNameToIds.get(longClientId)!.data;
 	}
 	getLongClientId(shortClientId: number) {
-		return shortClientId >= 0 ? this.shortClientIdMap[shortClientId] : "original";
+		return shortClientId >= 0 ? this.shortClientIdMap[shortClientId] : LongLocalClientId;
 	}
 	addLongClientId(longClientId: string) {
 		this.clientNameToIds.put(longClientId, this.shortClientIdMap.length);

@@ -9,9 +9,9 @@ import {
 	MergeTreeDeltaOperationType,
 	MergeTreeDeltaType,
 	toRemovalInfo,
+	Client,
 } from "@fluidframework/merge-tree";
 import { MatrixItem, SharedMatrix } from "./matrix";
-import { Handle, isHandleValid } from "./handletable";
 import { PermutationSegment, PermutationVector } from "./permutationvector";
 import { IUndoConsumer } from "./types";
 
@@ -160,24 +160,51 @@ export class MatrixUndoProvider<T> {
 		);
 	}
 
-	cellSet(rowHandle: Handle, colHandle: Handle, oldValue: MatrixItem<T>) {
-		assert(
-			isHandleValid(rowHandle) && isHandleValid(colHandle),
-			0x02c /* "On cellSet(), invalid row and/or column handles!" */,
-		);
-
+	cellSet(
+		row: number,
+		col: number,
+		oldValue: MatrixItem<T>,
+		rowsRefSeq: number,
+		colsRefSeq: number,
+		localSeq: number,
+	) {
 		if (this.consumer !== undefined) {
 			this.consumer.pushToCurrentOperation({
 				revert: () => {
-					const row = this.rows.handleToPosition(rowHandle);
-					const col = this.cols.handleToPosition(colHandle);
+					const rowRebased = rebasePosition(this.rows, row, rowsRefSeq, localSeq);
+					const colRebased = rebasePosition(this.cols, col, colsRefSeq, localSeq);
 					// if the row/column no longer exists, we cannot set the cell
-					if (row < this.matrix.rowCount && col < this.matrix.colCount) {
-						this.matrix.setCell(row, col, oldValue);
+					if (rowRebased !== undefined && colRebased !== undefined) {
+						this.matrix.setCell(rowRebased, colRebased, oldValue);
 					}
 				},
 				discard: () => {},
 			});
 		}
 	}
+}
+
+// TODO: This is largely taken from method with the same name on matrix. That method doesn't have the `segment.removedSeq` check
+// but it probably should.
+function rebasePosition(
+	client: Client,
+	pos: number,
+	referenceSequenceNumber: number,
+	localSeq: number,
+): number | undefined {
+	// TODO: There are some lurking bugs here that can happen when undo/redo and the reconnect flow interleave:
+	// the clientId here is grabbed too late, but also it's not clear that underlying mergeTree APIs support
+	// this well since they assert when trying to resolve segments using localSeq that isn't applicable to
+	// the current client id.
+	const { clientId } = client.getCollabWindow();
+	const { segment, offset } = client.getContainingSegment(
+		pos,
+		{ referenceSequenceNumber, clientId: client.getLongClientId(clientId) },
+		localSeq,
+	);
+	if (segment === undefined || offset === undefined || segment.removedSeq !== undefined) {
+		return;
+	}
+
+	return client.findReconnectionPosition(segment, localSeq) + offset;
 }
