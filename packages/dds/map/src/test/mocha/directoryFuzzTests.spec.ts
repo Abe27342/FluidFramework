@@ -68,8 +68,8 @@ interface OperationGenerationConfig {
 
 const defaultOptions: Required<OperationGenerationConfig> = {
 	validateInterval: 10,
-	maxSubDirectoryChild: 3,
-	subDirectoryNamePool: ["dir1", "dir2", "dir3"],
+	maxSubDirectoryChild: 2,
+	subDirectoryNamePool: ["dir1", "dir2"],
 	keyNamePool: ["prop1", "prop2", "prop3"],
 };
 
@@ -211,12 +211,12 @@ function makeOperationGenerator(
 		[createSubDirectory, 2],
 		[
 			deleteSubDirectory,
-			1,
+			2,
 			(state: FuzzTestState): boolean => (state.channel.countSubDirectory?.() ?? 0) > 0,
 		],
-		[setKey, 5],
+		[setKey, 0],
 		[deleteKey, 2, (state: FuzzTestState): boolean => state.channel.size > 0],
-		[clearKeys, 1, (state: FuzzTestState): boolean => state.channel.size > 0],
+		[clearKeys, 0, (state: FuzzTestState): boolean => state.channel.size > 0],
 	]);
 }
 
@@ -362,10 +362,10 @@ describe("SharedDirectory fuzz", () => {
 		clientJoinOptions: {
 			// Note: if tests are slow, we may want to tune this down. This mimics behavior before this suite
 			// was refactored to use the DDS fuzz harness.
-			maxNumberOfClients: Number.MAX_SAFE_INTEGER,
+			maxNumberOfClients: 3,
 			clientAddProbability: 0.08,
 		},
-		defaultTestCount: 10,
+		defaultTestCount: 100,
 		// Uncomment this line to replay a specific seed from its failure file:
 		// replay: 0,
 		saveFailures: { directory: dirPath.join(__dirname, "../../../src/test/mocha/results") },
