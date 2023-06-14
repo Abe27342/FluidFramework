@@ -31,7 +31,8 @@ import {
 	IInboundSignalMessage,
 	IProvideFluidDataStoreRegistry,
 } from "@fluidframework/runtime-definitions";
-import { IChannel } from ".";
+import { IChannel } from "./channel";
+import { IConfigurableChannelAttributes } from "./storage";
 
 export interface IFluidDataStoreRuntimeEvents extends IEvent {
 	(event: "disconnected" | "dispose" | "attaching" | "attached", listener: () => void);
@@ -93,7 +94,11 @@ export interface IFluidDataStoreRuntime
 	 * @param id - ID of the channel to be created.  A unique ID will be generated if left undefined.
 	 * @param type - Type of the channel.
 	 */
-	createChannel(id: string | undefined, type: string): IChannel;
+	createChannel(
+		id: string | undefined,
+		type: string,
+		params: IConfigurableChannelAttributes,
+	): IChannel;
 
 	/**
 	 * Bind the channel with the data store runtime. If the runtime

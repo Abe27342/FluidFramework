@@ -28,7 +28,11 @@ export class SharedNumberSequence extends SharedSequence<number> {
 	 * For more info, please see [Github issue 8526](https://github.com/microsoft/FluidFramework/issues/8526)
 	 */
 	public static create(runtime: IFluidDataStoreRuntime, id?: string) {
-		return runtime.createChannel(id, SharedNumberSequenceFactory.Type) as SharedNumberSequence;
+		return runtime.createChannel(
+			id,
+			SharedNumberSequenceFactory.Type,
+			SharedNumberSequenceFactory.Attributes,
+		) as SharedNumberSequence;
 	}
 
 	/**

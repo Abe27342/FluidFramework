@@ -18,10 +18,8 @@ export class InventoryList extends DataObject {
 	}
 
 	protected async initializingFirstTime() {
-		this._tree = this.runtime.createChannel(
-			undefined,
-			new SharedTreeFactory().type,
-		) as ISharedTree;
+		const factory = new SharedTreeFactory();
+		this._tree = factory.create(this.runtime, "inventory-list-tree");
 
 		this.root.set(treeKey, this.tree.handle);
 	}

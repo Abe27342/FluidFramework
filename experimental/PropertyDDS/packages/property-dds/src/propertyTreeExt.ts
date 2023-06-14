@@ -13,7 +13,13 @@ import { DeflatedPropertyTreeFactory, LZ4PropertyTreeFactory } from "./propertyT
  */
 export class DeflatedPropertyTree extends SharedPropertyTree {
 	public static create(runtime: IFluidDataStoreRuntime, id?: string, queryString?: string) {
-		return runtime.createChannel(id, DeflatedPropertyTreeFactory.Type) as DeflatedPropertyTree;
+		// TODO: This looks like a place that actually wants parameterized DDS creation:
+		// if so, attributes should not be static
+		return runtime.createChannel(
+			id,
+			DeflatedPropertyTreeFactory.Type,
+			DeflatedPropertyTreeFactory.Attributes,
+		) as DeflatedPropertyTree;
 	}
 
 	public static getFactory(): IChannelFactory {
@@ -23,7 +29,13 @@ export class DeflatedPropertyTree extends SharedPropertyTree {
 
 export class LZ4PropertyTree extends SharedPropertyTree {
 	public static create(runtime: IFluidDataStoreRuntime, id?: string, queryString?: string) {
-		return runtime.createChannel(id, LZ4PropertyTreeFactory.Type) as LZ4PropertyTree;
+		// TODO: This looks like a place that actually wants parameterized DDS creation:
+		// if so, attributes should not be static
+		return runtime.createChannel(
+			id,
+			LZ4PropertyTreeFactory.Type,
+			LZ4PropertyTreeFactory.Attributes,
+		) as LZ4PropertyTree;
 	}
 
 	public static getFactory(): IChannelFactory {

@@ -105,6 +105,7 @@ export class SharedStringWithV1IntervalCollection extends SharedString {
 		return runtime.createChannel(
 			id,
 			V1IntervalCollectionSharedStringFactory.Type,
+			V1IntervalCollectionSharedStringFactory.Attributes,
 		) as SharedStringWithV1IntervalCollection;
 	}
 

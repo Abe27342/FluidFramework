@@ -12,6 +12,7 @@ import { IChannelFactory } from '@fluidframework/datastore-definitions';
 import { IChannelServices } from '@fluidframework/datastore-definitions';
 import { IChannelStorageService } from '@fluidframework/datastore-definitions';
 import { ICombiningOp } from '@fluidframework/merge-tree';
+import { IConfigurableChannelAttributes } from '@fluidframework/datastore-definitions';
 import { IEvent } from '@fluidframework/common-definitions';
 import { IEventThisPlaceHolder } from '@fluidframework/common-definitions';
 import { IFluidDataStoreRuntime } from '@fluidframework/datastore-definitions';
@@ -357,7 +358,7 @@ export class SequenceMaintenanceEvent extends SequenceEvent<MergeTreeMaintenance
 }
 
 // @public (undocumented)
-export interface SequenceOptions {
+export interface SequenceOptions extends IConfigurableChannelAttributes {
     // (undocumented)
     attribution: IMergeTreeAttributionOptions;
 }
@@ -492,13 +493,13 @@ export class SharedString extends SharedSegmentSequence<SharedStringSegment> imp
     constructor(document: IFluidDataStoreRuntime, id: string, attributes: IChannelAttributes, options?: SequenceOptions);
     annotateMarker(marker: Marker, props: PropertySet, combiningOp?: ICombiningOp): void;
     annotateMarkerNotifyConsensus(marker: Marker, props: PropertySet, callback: (m: Marker) => void): void;
-    static create(runtime: IFluidDataStoreRuntime, id?: string): SharedString;
+    static create(runtime: IFluidDataStoreRuntime, id?: string, params?: SequenceOptions): SharedString;
     findTile(startPos: number | undefined, tileLabel: string, preceding?: boolean): {
         tile: ReferencePosition;
         pos: number;
     } | undefined;
-    static getFactory(options: SequenceOptions): SharedStringFactory;
     static getFactory(): SharedStringFactory;
+    static getFactory(options: SequenceOptions | undefined): SharedStringFactory;
     getMarkerFromId(id: string): ISegment | undefined;
     getText(start?: number, end?: number): string;
     // (undocumented)
@@ -519,17 +520,17 @@ export class SharedString extends SharedSegmentSequence<SharedStringSegment> imp
 
 // @public (undocumented)
 export class SharedStringFactory implements IChannelFactory {
-    constructor(options?: SequenceOptions | undefined);
+    constructor(configurableAttributes?: SequenceOptions | undefined);
     // (undocumented)
     static readonly Attributes: IChannelAttributes;
     // (undocumented)
     get attributes(): ISharedStringAttributes;
     // (undocumented)
+    readonly configurableAttributes?: SequenceOptions | undefined;
+    // (undocumented)
     create(document: IFluidDataStoreRuntime, id: string): SharedString;
     // (undocumented)
     load(runtime: IFluidDataStoreRuntime, id: string, services: IChannelServices, attributes: IChannelAttributes): Promise<SharedString>;
-    // (undocumented)
-    readonly options?: SequenceOptions | undefined;
     // (undocumented)
     static segmentFromSpec(spec: any): SharedStringSegment;
     // (undocumented)

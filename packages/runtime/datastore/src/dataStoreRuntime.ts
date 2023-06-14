@@ -76,6 +76,7 @@ import {
 	IFluidDataStoreRuntime,
 	IFluidDataStoreRuntimeEvents,
 	IChannelFactory,
+	IConfigurableChannelAttributes,
 } from "@fluidframework/datastore-definitions";
 import { v4 as uuid } from "uuid";
 import { IChannelContext, summarizeChannel } from "./channelContext";
@@ -439,7 +440,11 @@ export class FluidDataStoreRuntime
 		return channel;
 	}
 
-	public createChannel(id: string = uuid(), type: string): IChannel {
+	public createChannel(
+		id: string = uuid(),
+		type: string,
+		params: IConfigurableChannelAttributes,
+	): IChannel {
 		if (id.includes("/")) {
 			throw new UsageError(`Id cannot contain slashes: ${id}`);
 		}
@@ -452,6 +457,7 @@ export class FluidDataStoreRuntime
 			id,
 			this.sharedObjectRegistry,
 			type,
+			params,
 			this,
 			this.dataStoreContext,
 			this.dataStoreContext.storage,

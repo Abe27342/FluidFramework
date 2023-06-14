@@ -303,10 +303,7 @@ describeFullCompat(`Dehydrate Rehydrate Container Test`, (getTestObjectProvider)
 				await createDetachedContainerAndGetRootDataStore();
 			const snapshotTree1 = getSnapshotTreeFromSerializedSnapshot(container);
 			// Create a channel
-			const channel = defaultDataStore.runtime.createChannel(
-				"test1",
-				"https://graph.microsoft.com/types/map",
-			) as SharedMap;
+			const channel = SharedMap.create(defaultDataStore.runtime, "test1");
 			channel.bindToContext();
 			const snapshotTree2 = getSnapshotTreeFromSerializedSnapshot(container);
 
@@ -843,10 +840,7 @@ describeFullCompat(`Dehydrate Rehydrate Container Test`, (getTestObjectProvider)
 
 			// Create another not bounded dds
 			const ddsId = "notbounddds";
-			const dds2 = defaultDataStore.runtime.createChannel(
-				ddsId,
-				SharedString.getFactory().type,
-			);
+			const dds2 = SharedMap.create(defaultDataStore.runtime, ddsId);
 
 			const rootOfDataStore1 = await defaultDataStore.getSharedObject<SharedMap>(sharedMapId);
 			rootOfDataStore1.set("dd2", dds2.handle);
@@ -880,10 +874,7 @@ describeFullCompat(`Dehydrate Rehydrate Container Test`, (getTestObjectProvider)
 
 				// Create another not bounded dds
 				const ddsId = "notbounddds";
-				const dds2 = defaultDataStore.runtime.createChannel(
-					ddsId,
-					SharedMap.getFactory().type,
-				) as SharedMap;
+				const dds2 = SharedMap.create(defaultDataStore.runtime, ddsId);
 				dds2.set("dataStore2", dataStore2.handle);
 
 				const rootOfDataStore1 = await defaultDataStore.getSharedObject<SharedMap>(
@@ -932,10 +923,7 @@ describeFullCompat(`Dehydrate Rehydrate Container Test`, (getTestObjectProvider)
 
 				// Create another not bounded dds
 				const ddsId = "notbounddds";
-				const dds2 = dataStore2.runtime.createChannel(
-					ddsId,
-					SharedMap.getFactory().type,
-				) as SharedMap;
+				const dds2 = SharedMap.create(dataStore2.runtime, ddsId);
 				const rootOfDataStore2 = await dataStore2.getSharedObject<SharedMap>(sharedMapId);
 				rootOfDataStore2.set("dds2", dds2.handle);
 

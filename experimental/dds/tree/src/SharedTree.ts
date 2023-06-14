@@ -380,7 +380,7 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	 * Create a new SharedTree. It will contain the default value (see initialTree).
 	 */
 	public static create(runtime: IFluidDataStoreRuntime, id?: string): SharedTree {
-		return runtime.createChannel(id, SharedTreeFactory.Type) as SharedTree;
+		return runtime.createChannel(id, SharedTreeFactory.Type, SharedTreeFactory.Attributes) as SharedTree;
 	}
 
 	/**

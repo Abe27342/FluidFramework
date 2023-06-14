@@ -30,6 +30,21 @@ import {
 
 import { assert } from "@fluidframework/common-utils";
 import { IDataObjectProps, PureDataObject, DataObjectTypes } from "../data-objects";
+
+export type NamedFluidChannelRegistryEntry = [name: string, factory: IChannelFactory];
+
+export type UnnamedFluidChannelRegistryEntry = IChannelFactory;
+
+export type FluidChannelRegistryEntry =
+	| NamedFluidChannelRegistryEntry
+	| UnnamedFluidChannelRegistryEntry;
+
+function isNamedFluidChannelRegistryEntry(
+	entry: FluidChannelRegistryEntry,
+): entry is NamedFluidChannelRegistryEntry {
+	return Array.isArray(entry) && entry.length === 2 && typeof entry[0] === "string";
+}
+
 /*
  * Useful interface in places where it's useful to do type erasure for PureDataObject generic
  */
@@ -138,7 +153,7 @@ export class PureDataObjectFactory<
 	constructor(
 		public readonly type: string,
 		private readonly ctor: new (props: IDataObjectProps<I>) => TObj,
-		sharedObjects: readonly IChannelFactory[],
+		sharedObjects: readonly FluidChannelRegistryEntry[],
 		private readonly optionalProviders: FluidObjectSymbolProvider<I["OptionalProviders"]>,
 		registryEntries?: NamedFluidDataStoreRegistryEntries,
 		private readonly runtimeClass: typeof FluidDataStoreRuntime = FluidDataStoreRuntime,
@@ -149,7 +164,11 @@ export class PureDataObjectFactory<
 		if (registryEntries !== undefined) {
 			this.registry = new FluidDataStoreRegistry(registryEntries);
 		}
-		this.sharedObjectRegistry = new Map(sharedObjects.map((ext) => [ext.type, ext]));
+		this.sharedObjectRegistry = new Map(
+			sharedObjects.map((entry) =>
+				isNamedFluidChannelRegistryEntry(entry) ? entry : [entry.type, entry],
+			),
+		);
 	}
 
 	public get IFluidDataStoreFactory() {

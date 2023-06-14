@@ -12,7 +12,7 @@ import {
 import { Marker, TextSegment } from "@fluidframework/merge-tree";
 import { pkgVersion } from "./packageVersion";
 import { SharedString, SharedStringSegment } from "./sharedString";
-import { SequenceOptions } from "./sequence";
+import { SequenceAttributes } from "./sequence";
 
 export interface ISharedStringAttributes extends IChannelAttributes {
 	attribution?: {
@@ -32,7 +32,7 @@ export class SharedStringFactory implements IChannelFactory {
 		packageVersion: pkgVersion,
 	};
 
-	public constructor(public readonly options?: SequenceOptions) {}
+	public constructor(public readonly configurableAttributes?: SequenceAttributes) {}
 
 	public static segmentFromSpec(spec: any): SharedStringSegment {
 		const maybeText = TextSegment.fromJSONObject(spec);
@@ -53,8 +53,8 @@ export class SharedStringFactory implements IChannelFactory {
 	}
 
 	public get attributes(): ISharedStringAttributes {
-		if (this.options !== undefined) {
-			const { policyFactory, track } = this.options.attribution;
+		if (this.configurableAttributes !== undefined) {
+			const { policyFactory, track } = this.configurableAttributes.attribution;
 			if (track !== undefined && policyFactory !== undefined) {
 				return {
 					...SharedStringFactory.Attributes,
@@ -78,13 +78,18 @@ export class SharedStringFactory implements IChannelFactory {
 		services: IChannelServices,
 		attributes: IChannelAttributes,
 	): Promise<SharedString> {
-		const sharedString = new SharedString(runtime, id, attributes, this.options);
+		const sharedString = new SharedString(runtime, id, attributes, this.configurableAttributes);
 		await sharedString.load(services);
 		return sharedString;
 	}
 
 	public create(document: IFluidDataStoreRuntime, id: string): SharedString {
-		const sharedString = new SharedString(document, id, this.attributes, this.options);
+		const sharedString = new SharedString(
+			document,
+			id,
+			this.attributes,
+			this.configurableAttributes,
+		);
 		sharedString.initializeLocal();
 		return sharedString;
 	}

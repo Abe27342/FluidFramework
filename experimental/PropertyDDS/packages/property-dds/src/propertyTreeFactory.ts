@@ -8,6 +8,7 @@ import {
 	IFluidDataStoreRuntime,
 	IChannelServices,
 	IChannelFactory,
+	IConfigurableChannelAttributes,
 } from "@fluidframework/datastore-definitions";
 import { SharedPropertyTree, SharedPropertyTreeOptions } from "./propertyTree";
 
@@ -36,7 +37,6 @@ export class PropertyTreeFactory implements IChannelFactory {
 		id: string,
 		services: IChannelServices,
 		attributes: IChannelAttributes,
-		url?: string,
 	): Promise<SharedPropertyTree> {
 		const options = {};
 		// default object
@@ -53,7 +53,7 @@ export class PropertyTreeFactory implements IChannelFactory {
 	public create(
 		document: IFluidDataStoreRuntime,
 		id: string,
-		requestUrl?: string,
+		params: IConfigurableChannelAttributes,
 	): SharedPropertyTree {
 		const options = {};
 		const cell = new SharedPropertyTree(

@@ -96,6 +96,7 @@ export class SharedIntervalCollection
 		return runtime.createChannel(
 			id,
 			SharedIntervalCollectionFactory.Type,
+			SharedIntervalCollectionFactory.Attributes,
 		) as SharedIntervalCollection;
 	}
 

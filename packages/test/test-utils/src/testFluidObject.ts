@@ -109,7 +109,11 @@ export class TestFluidObject implements ITestFluidObject, IFluidRouter {
 			this.root = SharedMap.create(this.runtime, "root");
 
 			this.factoryEntriesMap.forEach((sharedObjectFactory: IChannelFactory, key: string) => {
-				const sharedObject = this.runtime.createChannel(key, sharedObjectFactory.type);
+				const sharedObject = this.runtime.createChannel(
+					key,
+					sharedObjectFactory.type,
+					sharedObjectFactory.attributes,
+				);
 				this.root.set(key, sharedObject.handle);
 			});
 

@@ -112,7 +112,11 @@ export class LazyLoadedDataObjectFactory<T extends LazyLoadedDataObject>
 		runtime: IFluidDataStoreRuntime,
 		props?: any,
 	) {
-		const root = runtime.createChannel("root", this.root.type) as ISharedObject;
+		const root = runtime.createChannel(
+			"root",
+			this.root.type,
+			this.root.attributes,
+		) as ISharedObject;
 		const instance = new this.ctor(context, runtime, root);
 		instance.create(props);
 		root.bindToContext();

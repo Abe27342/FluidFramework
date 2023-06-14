@@ -42,6 +42,7 @@ describe("LocalChannelContext Tests", () => {
 				invalidId,
 				sharedObjectRegistry,
 				"SomeType",
+				{ snapshotFormatVersion: "0.0.0" },
 				dataStoreRuntime,
 				dataStoreContext,
 				dataStoreContext.storage,

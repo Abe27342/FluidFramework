@@ -73,7 +73,8 @@ export abstract class DataObject<I extends DataObjectTypes = DataObjectTypes> ex
 
 // @public
 export class DataObjectFactory<TObj extends DataObject<I>, I extends DataObjectTypes = DataObjectTypes> extends PureDataObjectFactory<TObj, I> {
-    constructor(type: string, ctor: new (props: IDataObjectProps<I>) => TObj, sharedObjects: readonly IChannelFactory[] | undefined, optionalProviders: FluidObjectSymbolProvider<I["OptionalProviders"]>, registryEntries?: NamedFluidDataStoreRegistryEntries, runtimeFactory?: typeof FluidDataStoreRuntime);
+    // Warning: (ae-forgotten-export) The symbol "FluidChannelRegistryEntry" needs to be exported by the entry point index.d.ts
+    constructor(type: string, ctor: new (props: IDataObjectProps<I>) => TObj, sharedObjects: readonly FluidChannelRegistryEntry[] | undefined, optionalProviders: FluidObjectSymbolProvider<I["OptionalProviders"]>, registryEntries?: NamedFluidDataStoreRegistryEntries, runtimeFactory?: typeof FluidDataStoreRuntime);
 }
 
 // @public
@@ -156,7 +157,7 @@ export abstract class PureDataObject<I extends DataObjectTypes = DataObjectTypes
 
 // @public
 export class PureDataObjectFactory<TObj extends PureDataObject<I>, I extends DataObjectTypes = DataObjectTypes> implements IFluidDataStoreFactory, Partial<IProvideFluidDataStoreRegistry>, IRootDataObjectFactory {
-    constructor(type: string, ctor: new (props: IDataObjectProps<I>) => TObj, sharedObjects: readonly IChannelFactory[], optionalProviders: FluidObjectSymbolProvider<I["OptionalProviders"]>, registryEntries?: NamedFluidDataStoreRegistryEntries, runtimeClass?: typeof FluidDataStoreRuntime);
+    constructor(type: string, ctor: new (props: IDataObjectProps<I>) => TObj, sharedObjects: readonly FluidChannelRegistryEntry[], optionalProviders: FluidObjectSymbolProvider<I["OptionalProviders"]>, registryEntries?: NamedFluidDataStoreRegistryEntries, runtimeClass?: typeof FluidDataStoreRuntime);
     createChildInstance(parentContext: IFluidDataStoreContext, initialState?: I["InitialState"]): Promise<TObj>;
     createInstance(runtime: IContainerRuntimeBase, initialState?: I["InitialState"]): Promise<TObj>;
     // (undocumented)

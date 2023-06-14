@@ -108,7 +108,7 @@ export class Ink extends SharedObject<IInkEvents> implements IInk {
 	 * @returns Newly create Ink object (but not attached yet)
 	 */
 	public static create(runtime: IFluidDataStoreRuntime, id?: string) {
-		return runtime.createChannel(id, InkFactory.Type) as Ink;
+		return runtime.createChannel(id, InkFactory.Type, InkFactory.Attributes) as Ink;
 	}
 
 	/**

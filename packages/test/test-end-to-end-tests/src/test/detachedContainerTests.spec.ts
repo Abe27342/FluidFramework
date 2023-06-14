@@ -405,10 +405,7 @@ describeFullCompat("Detached Container", (getTestObjectProvider) => {
 		const containerP = container.attach(request);
 
 		// Fire attach op
-		const testChannel = dataStore.runtime.createChannel(
-			testChannelId,
-			SharedMap.getFactory().type,
-		);
+		const testChannel = SharedMap.create(dataStore.runtime, testChannelId);
 		testChannel.handle.attachGraph();
 		await containerP;
 		await defPromise.promise;

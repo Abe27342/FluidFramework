@@ -10,6 +10,7 @@ import { IAudience } from '@fluidframework/container-definitions';
 import { IChannel } from '@fluidframework/datastore-definitions';
 import { IChannelFactory } from '@fluidframework/datastore-definitions';
 import { IClientDetails } from '@fluidframework/protocol-definitions';
+import { IConfigurableChannelAttributes } from '@fluidframework/datastore-definitions';
 import { IDeltaManager } from '@fluidframework/container-definitions';
 import { IDocumentMessage } from '@fluidframework/protocol-definitions';
 import { IFluidDataStoreChannel } from '@fluidframework/runtime-definitions';
@@ -64,7 +65,7 @@ export class FluidDataStoreRuntime extends TypedEventEmitter<IFluidDataStoreRunt
     // (undocumented)
     get connected(): boolean;
     // (undocumented)
-    createChannel(id: string | undefined, type: string): IChannel;
+    createChannel(id: string | undefined, type: string, params: IConfigurableChannelAttributes): IChannel;
     // (undocumented)
     readonly deltaManager: IDeltaManager<ISequencedDocumentMessage, IDocumentMessage>;
     // (undocumented)

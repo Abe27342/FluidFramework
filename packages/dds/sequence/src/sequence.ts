@@ -7,6 +7,7 @@ import { ChildLogger } from "@fluidframework/telemetry-utils";
 import { ISequencedDocumentMessage, MessageType } from "@fluidframework/protocol-definitions";
 import {
 	IChannelAttributes,
+	IConfigurableChannelAttributes,
 	IFluidDataStoreRuntime,
 	IChannelStorageService,
 } from "@fluidframework/datastore-definitions";
@@ -48,7 +49,6 @@ import {
 } from "@fluidframework/shared-object-base";
 import { IEventThisPlaceHolder } from "@fluidframework/common-definitions";
 import { ISummaryTreeWithStats, ITelemetryContext } from "@fluidframework/runtime-definitions";
-
 import { DefaultMap, IMapOperation } from "./defaultMap";
 import { IMapMessageLocalMetadata, IValueChanged } from "./defaultMapInterfaces";
 import {
@@ -110,7 +110,7 @@ export interface ISharedSegmentSequenceEvents extends ISharedObjectEvents {
 	);
 }
 
-export interface SequenceOptions {
+export interface SequenceAttributes extends IConfigurableChannelAttributes {
 	attribution: IMergeTreeAttributionOptions;
 }
 
@@ -194,7 +194,7 @@ export abstract class SharedSegmentSequence<T extends ISegment>
 		public id: string,
 		attributes: IChannelAttributes,
 		public readonly segmentFromSpec: (spec: IJSONSegment) => ISegment,
-		options?: SequenceOptions,
+		options?: SequenceAttributes,
 	) {
 		super(id, dataStoreRuntime, attributes, "fluid_sequence_");
 

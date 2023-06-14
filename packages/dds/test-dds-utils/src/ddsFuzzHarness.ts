@@ -519,7 +519,11 @@ function createClient<TChannelFactory extends IChannelFactory>(
 	// this isn't how it would work in a real scenario, but the mocks don't use the channel id for any message
 	// routing behavior and making all of the object ids consistent helps with debugging and writing more informative
 	// consistency validation.
-	const channel: ReturnType<typeof factory.create> = factory.create(dataStoreRuntime, clientId);
+	const channel: ReturnType<typeof factory.create> = factory.create(
+		dataStoreRuntime,
+		clientId,
+		factory.attributes,
+	);
 
 	const containerRuntime = containerRuntimeFactory.createContainerRuntime(dataStoreRuntime);
 	const services: IChannelServices = {

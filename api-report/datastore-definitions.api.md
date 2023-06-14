@@ -43,17 +43,16 @@ export interface IChannel extends IFluidLoadable {
 }
 
 // @public
-export interface IChannelAttributes {
+export interface IChannelAttributes extends IConfigurableChannelAttributes {
     readonly packageVersion?: string;
-    readonly snapshotFormatVersion: string;
     readonly type: string;
 }
 
 // @public
 export interface IChannelFactory {
     readonly attributes: IChannelAttributes;
-    create(runtime: IFluidDataStoreRuntime, id: string): IChannel;
-    load(runtime: IFluidDataStoreRuntime, id: string, services: IChannelServices, channelAttributes: Readonly<IChannelAttributes>): Promise<IChannel>;
+    create(runtime: IFluidDataStoreRuntime, id: string, params: IConfigurableChannelAttributes): IChannel;
+    load(runtime: IFluidDataStoreRuntime, id: string, services: IChannelServices, attributes: IChannelAttributes): Promise<IChannel>;
     readonly type: string;
 }
 
@@ -70,6 +69,11 @@ export interface IChannelStorageService {
     contains(path: string): Promise<boolean>;
     list(path: string): Promise<string[]>;
     readBlob(path: string): Promise<ArrayBufferLike>;
+}
+
+// @public
+export interface IConfigurableChannelAttributes {
+    readonly snapshotFormatVersion: string;
 }
 
 // @public
@@ -101,7 +105,7 @@ export interface IFluidDataStoreRuntime extends IFluidRouter, IEventProvider<IFl
     readonly clientId: string | undefined;
     // (undocumented)
     readonly connected: boolean;
-    createChannel(id: string | undefined, type: string): IChannel;
+    createChannel(id: string | undefined, type: string, params: IConfigurableChannelAttributes): IChannel;
     // (undocumented)
     readonly deltaManager: IDeltaManager<ISequencedDocumentMessage, IDocumentMessage>;
     ensureNoDataModelChanges<T>(callback: () => T): T;

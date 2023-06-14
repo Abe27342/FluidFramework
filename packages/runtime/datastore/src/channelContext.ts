@@ -174,7 +174,11 @@ export async function loadChannelFactoryAndAttributes(
 				tag: TelemetryDataTag.CodeArtifact,
 			},
 			dataStorePackagePath: dataStoreContext.packagePath.join("/"),
-			channelFactoryType,
+			channelFactoryType: {
+				// TODO: could be less conservative for entries with types in our code.
+				value: channelFactoryType,
+				tag: TelemetryDataTag.CodeArtifact,
+			},
 		});
 	}
 	// This is a backward compatibility case where the attach message doesn't include attributes. Get the attributes

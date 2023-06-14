@@ -36,6 +36,7 @@ export class SharedObjectSequence<T> extends SharedSequence<T> {
 		return runtime.createChannel(
 			id,
 			SharedObjectSequenceFactory.Type,
+			SharedObjectSequenceFactory.Attributes,
 		) as SharedObjectSequence<T>;
 	}
 

@@ -44,7 +44,11 @@ export class SharedSummaryBlock extends SharedObject implements ISharedSummaryBl
 	 * @returns newly created shared summary block (but not attached yet).
 	 */
 	public static create(runtime: IFluidDataStoreRuntime, id?: string) {
-		return runtime.createChannel(id, SharedSummaryBlockFactory.Type) as SharedSummaryBlock;
+		return runtime.createChannel(
+			id,
+			SharedSummaryBlockFactory.Type,
+			SharedSummaryBlockFactory.Attributes,
+		) as SharedSummaryBlock;
 	}
 
 	/**

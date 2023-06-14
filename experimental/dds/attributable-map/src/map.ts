@@ -108,7 +108,7 @@ export class AttributableMap extends SharedObject<ISharedMapEvents> implements I
 	 * ```
 	 */
 	public static create(runtime: IFluidDataStoreRuntime, id?: string): AttributableMap {
-		return runtime.createChannel(id, MapFactory.Type) as AttributableMap;
+		return runtime.createChannel(id, MapFactory.Type, MapFactory.Attributes) as AttributableMap;
 	}
 
 	/**

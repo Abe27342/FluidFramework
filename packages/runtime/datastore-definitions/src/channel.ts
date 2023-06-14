@@ -11,7 +11,7 @@ import {
 	ISummaryTreeWithStats,
 	ITelemetryContext,
 } from "@fluidframework/runtime-definitions";
-import { IChannelAttributes } from "./storage";
+import { IChannelAttributes, IConfigurableChannelAttributes } from "./storage";
 import { IFluidDataStoreRuntime } from "./dataStoreRuntime";
 
 export interface IChannel extends IFluidLoadable {
@@ -250,6 +250,9 @@ export interface IChannelFactory {
 
 	/**
 	 * Attributes of the channel.
+	 *
+	 * TODO: This type is weird; it should be just the type/packageVersion field. removing for now to see how many compile-time issues
+	 * it causes.
 	 */
 	readonly attributes: IChannelAttributes;
 
@@ -272,7 +275,7 @@ export interface IChannelFactory {
 		runtime: IFluidDataStoreRuntime,
 		id: string,
 		services: IChannelServices,
-		channelAttributes: Readonly<IChannelAttributes>,
+		attributes: IChannelAttributes,
 	): Promise<IChannel>;
 
 	/**
@@ -286,5 +289,9 @@ export interface IChannelFactory {
 	 * NOTE here - When we attach we need to submit all the pending ops prior to actually doing the attach
 	 * for consistency.
 	 */
-	create(runtime: IFluidDataStoreRuntime, id: string): IChannel;
+	create(
+		runtime: IFluidDataStoreRuntime,
+		id: string,
+		params: IConfigurableChannelAttributes,
+	): IChannel;
 }

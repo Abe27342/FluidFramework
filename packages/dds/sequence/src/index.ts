@@ -34,7 +34,11 @@ export {
 	SerializedIntervalDelta,
 } from "./intervalCollection";
 export { IInterval, IntervalConflictResolver } from "./intervalTree";
-export { ISharedSegmentSequenceEvents, SharedSegmentSequence, SequenceOptions } from "./sequence";
+export {
+	ISharedSegmentSequenceEvents,
+	SharedSegmentSequence,
+	SequenceAttributes as SequenceOptions,
+} from "./sequence";
 export {
 	ISequenceDeltaRange,
 	SequenceDeltaEvent,

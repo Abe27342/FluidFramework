@@ -131,7 +131,11 @@ export class RootDataObject
 		sharedObjectClass: SharedObjectClass<T>,
 	): T {
 		const factory = sharedObjectClass.getFactory();
-		const obj = this.runtime.createChannel(undefined, factory.type);
+		// TODO: Patterns on how this is meant to achieve parameterized creation need to be settled
+		// or more generally, how this is going to work in the azure ecosystem.
+		// Current users can work around awkwardness by defining their own "SharedObjectFactoryFactory", since
+		// that's functionally all that `sharedObjectClass` acts as here.
+		const obj = this.runtime.createChannel(undefined, factory.type, factory.attributes);
 		return obj as unknown as T;
 	}
 }

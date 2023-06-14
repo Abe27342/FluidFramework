@@ -23,7 +23,7 @@ import { Json1Factory } from "./factory";
 
 export class SharedJson1 extends SharedOT<Doc, JSONOp> {
 	public static create(runtime: IFluidDataStoreRuntime, id?: string): SharedJson1 {
-		return runtime.createChannel(id, Json1Factory.Type) as SharedJson1;
+		return runtime.createChannel(id, Json1Factory.Type, Json1Factory.Attributes) as SharedJson1;
 	}
 
 	public static getFactory() {

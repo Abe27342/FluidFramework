@@ -165,7 +165,7 @@ export class PactMap<T = unknown> extends SharedObject<IPactMapEvents> implement
 	 * @returns newly created PactMap (but not attached yet)
 	 */
 	public static create(runtime: IFluidDataStoreRuntime, id?: string): PactMap {
-		return runtime.createChannel(id, PactMapFactory.Type) as PactMap;
+		return runtime.createChannel(id, PactMapFactory.Type, PactMapFactory.Attributes) as PactMap;
 	}
 
 	/**

@@ -333,7 +333,11 @@ export class SharedDirectory
 	 * @returns Newly create shared directory (but not attached yet)
 	 */
 	public static create(runtime: IFluidDataStoreRuntime, id?: string): SharedDirectory {
-		return runtime.createChannel(id, DirectoryFactory.Type) as SharedDirectory;
+		return runtime.createChannel(
+			id,
+			DirectoryFactory.Type,
+			DirectoryFactory.Attributes,
+		) as SharedDirectory;
 	}
 
 	/**

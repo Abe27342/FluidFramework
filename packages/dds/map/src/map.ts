@@ -104,7 +104,7 @@ export class SharedMap extends SharedObject<ISharedMapEvents> implements IShared
 	 * ```
 	 */
 	public static create(runtime: IFluidDataStoreRuntime, id?: string): SharedMap {
-		return runtime.createChannel(id, MapFactory.Type) as SharedMap;
+		return runtime.createChannel(id, MapFactory.Type, MapFactory.Attributes) as SharedMap;
 	}
 
 	/**

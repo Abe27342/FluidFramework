@@ -28,6 +28,7 @@ const registry: ChannelFactoryRegistry = [
 				track: true,
 				policyFactory: createInsertOnlyAttributionPolicy,
 			},
+			snapshotFormatVersion: "0.1",
 		}),
 	],
 ];

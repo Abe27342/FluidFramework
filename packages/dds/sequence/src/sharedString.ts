@@ -19,7 +19,7 @@ import {
 	TextSegment,
 } from "@fluidframework/merge-tree";
 import { IFluidDataStoreRuntime, IChannelAttributes } from "@fluidframework/datastore-definitions";
-import { SharedSegmentSequence, SequenceOptions } from "./sequence";
+import { SharedSegmentSequence, SequenceAttributes } from "./sequence";
 import { SharedStringFactory } from "./sequenceFactory";
 
 /**
@@ -74,22 +74,42 @@ export class SharedString
 	 * @param id - optional name of the shared string
 	 * @returns newly create shared string (but not attached yet)
 	 */
-	public static create(runtime: IFluidDataStoreRuntime, id?: string) {
-		return runtime.createChannel(id, SharedStringFactory.Type) as SharedString;
+	public static create(
+		runtime: IFluidDataStoreRuntime,
+		id?: string,
+		params?: SequenceAttributes,
+	) {
+		// Step 1: separate serialized data from services. Need names for both of these.
+		// Serialized data ends up in attributes. Services registry injected by application.
+		// Step 2: getFactory() and constructor take in provided services, which get dynamically
+		// selected based on attributes at load time.
+		// Create time (here) probably needs to take in both to make this work.
+		//
+		// To make SharedTree flow work, we additionally need to support some kind of flow where Fluid runtime is
+		// loading something with older attributes, but user has provided a factory which says "no no no, I want
+		// to override/upgrade old attributes with this new set".
+		// This mode would need to be supported alongside modes which say "if loading a document in the old format,
+		// keep it that way".
+		const factory = this.getFactory(params);
+		return runtime.createChannel(
+			id,
+			SharedStringFactory.Type,
+			factory.attributes,
+		) as SharedString;
 	}
-
-	/**
-	 * Get a factory for SharedString to register with the data store.
-	 * @returns a factory that creates and load SharedString
-	 */
-	public static getFactory(options: SequenceOptions): SharedStringFactory;
 
 	/**
 	 * Get a factory for SharedString to register with the data store using the default options.
 	 * @returns a factory that creates and load SharedString
 	 */
 	public static getFactory(): SharedStringFactory;
-	public static getFactory(options?: SequenceOptions): SharedStringFactory {
+
+	/**
+	 * Get a factory for SharedString to register with the data store.
+	 * @returns a factory that creates and load SharedString
+	 */
+	public static getFactory(options: SequenceAttributes | undefined): SharedStringFactory;
+	public static getFactory(options?: SequenceAttributes): SharedStringFactory {
 		return new SharedStringFactory(options);
 	}
 
@@ -103,7 +123,7 @@ export class SharedString
 		document: IFluidDataStoreRuntime,
 		public id: string,
 		attributes: IChannelAttributes,
-		options?: SequenceOptions,
+		options?: SequenceAttributes,
 	) {
 		super(document, id, attributes, SharedStringFactory.segmentFromSpec as any, options);
 		this.mergeTreeTextHelper = this.client.createTextHelper();

@@ -5,12 +5,15 @@
 
 import { DirectoryFactory, MapFactory, SharedDirectory, SharedMap } from "@fluidframework/map";
 import { NamedFluidDataStoreRegistryEntries } from "@fluidframework/runtime-definitions";
-import { IChannelFactory } from "@fluidframework/datastore-definitions";
 import { FluidObjectSymbolProvider } from "@fluidframework/synthesize";
 import { FluidDataStoreRuntime } from "@fluidframework/datastore";
 
 import { DataObject, DataObjectTypes, IDataObjectProps } from "../data-objects";
-import { PureDataObjectFactory } from "./pureDataObjectFactory";
+import {
+	FluidChannelRegistryEntry,
+	PureDataObjectFactory,
+	UnnamedFluidChannelRegistryEntry,
+} from "./pureDataObjectFactory";
 
 /**
  * DataObjectFactory is the IFluidDataStoreFactory for use with DataObjects.
@@ -27,20 +30,29 @@ export class DataObjectFactory<
 	constructor(
 		type: string,
 		ctor: new (props: IDataObjectProps<I>) => TObj,
-		sharedObjects: readonly IChannelFactory[] = [],
+		sharedObjects: readonly FluidChannelRegistryEntry[] = [],
 		optionalProviders: FluidObjectSymbolProvider<I["OptionalProviders"]>,
 		registryEntries?: NamedFluidDataStoreRegistryEntries,
 		runtimeFactory: typeof FluidDataStoreRuntime = FluidDataStoreRuntime,
 	) {
 		const mergedObjects = [...sharedObjects];
 
-		if (!sharedObjects.find((factory) => factory.type === DirectoryFactory.Type)) {
-			// User did not register for directory
+		if (
+			!sharedObjects.find(
+				(factory) =>
+					(factory as UnnamedFluidChannelRegistryEntry).type === DirectoryFactory.Type,
+			)
+		) {
+			// User did not register for directory or registed it under the non-default name.
 			mergedObjects.push(SharedDirectory.getFactory());
 		}
 
 		// TODO: Remove SharedMap factory when compatibility with SharedMap DataObject is no longer needed in 0.10
-		if (!sharedObjects.find((factory) => factory.type === MapFactory.Type)) {
+		if (
+			!sharedObjects.find(
+				(factory) => (factory as UnnamedFluidChannelRegistryEntry).type === MapFactory.Type,
+			)
+		) {
 			// User did not register for map
 			mergedObjects.push(SharedMap.getFactory());
 		}

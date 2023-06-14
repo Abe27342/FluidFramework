@@ -107,6 +107,7 @@ export class ConsensusRegisterCollection<T>
 		return runtime.createChannel(
 			id,
 			ConsensusRegisterCollectionFactory.Type,
+			ConsensusRegisterCollectionFactory.Attributes,
 		) as ConsensusRegisterCollection<T>;
 	}
 

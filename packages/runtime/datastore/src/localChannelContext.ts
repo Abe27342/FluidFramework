@@ -8,7 +8,11 @@ import cloneDeep from "lodash/cloneDeep";
 import { ITelemetryLogger } from "@fluidframework/common-definitions";
 import { IDocumentStorageService } from "@fluidframework/driver-definitions";
 import { ISequencedDocumentMessage, ISnapshotTree } from "@fluidframework/protocol-definitions";
-import { IChannel, IFluidDataStoreRuntime } from "@fluidframework/datastore-definitions";
+import {
+	IChannel,
+	IConfigurableChannelAttributes,
+	IFluidDataStoreRuntime,
+} from "@fluidframework/datastore-definitions";
 import {
 	IFluidDataStoreContext,
 	IGarbageCollectionData,
@@ -286,6 +290,7 @@ export class LocalChannelContext extends LocalChannelContextBase {
 		id: string,
 		registry: ISharedObjectRegistry,
 		type: string,
+		params: IConfigurableChannelAttributes,
 		runtime: IFluidDataStoreRuntime,
 		dataStoreContext: IFluidDataStoreContext,
 		storageService: IDocumentStorageService,
@@ -299,7 +304,7 @@ export class LocalChannelContext extends LocalChannelContextBase {
 		if (factory === undefined) {
 			throw new Error(`Channel Factory ${type} not registered`);
 		}
-		const channel = factory.create(runtime, id);
+		const channel = factory.create(runtime, id, params);
 		super(
 			id,
 			runtime,

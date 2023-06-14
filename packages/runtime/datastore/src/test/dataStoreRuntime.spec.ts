@@ -128,7 +128,10 @@ describe("FluidDataStoreRuntime Tests", () => {
 	it("createChannel rejects ids with slashes", async () => {
 		const dataStoreRuntime = createRuntime(dataStoreContext, sharedObjectRegistry);
 		const invalidId = "beforeSlash/afterSlash";
-		const codeBlock = () => dataStoreRuntime.createChannel(invalidId, "SomeType");
+		const codeBlock = () =>
+			dataStoreRuntime.createChannel(invalidId, "SomeType", {
+				snapshotFormatVersion: "0.0.0",
+			});
 		assert.throws(
 			codeBlock,
 			(e) =>

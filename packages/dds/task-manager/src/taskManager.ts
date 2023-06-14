@@ -156,7 +156,11 @@ export class TaskManager extends SharedObject<ITaskManagerEvents> implements ITa
 	 * @returns newly create task queue (but not attached yet)
 	 */
 	public static create(runtime: IFluidDataStoreRuntime, id?: string) {
-		return runtime.createChannel(id, TaskManagerFactory.Type) as TaskManager;
+		return runtime.createChannel(
+			id,
+			TaskManagerFactory.Type,
+			TaskManagerFactory.Attributes,
+		) as TaskManager;
 	}
 
 	/**

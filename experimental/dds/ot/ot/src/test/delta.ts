@@ -14,7 +14,7 @@ import { SharedOT } from "../../dist";
 
 export class SharedDelta extends SharedOT<Delta, Delta> {
 	public static create(runtime: IFluidDataStoreRuntime, id?: string): SharedDelta {
-		return runtime.createChannel(id, DeltaFactory.Type) as SharedDelta;
+		return runtime.createChannel(id, DeltaFactory.Type, DeltaFactory.Attributes) as SharedDelta;
 	}
 
 	public static getFactory() {

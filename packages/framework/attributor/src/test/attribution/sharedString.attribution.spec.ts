@@ -249,6 +249,9 @@ function createSharedString(
 					track: makeSerializer !== undefined,
 					policyFactory: createInsertOnlyAttributionPolicy,
 				},
+				// TODO: Letting user specify this entirely is somewhat rough. Would be great to make this type-restricted
+				// to specific strings supported by the DDS.
+				snapshotFormatVersion: "0.1",
 			});
 			const sharedString = factory.create(dataStoreRuntime, String.fromCharCode(index + 65));
 			if (index === 0 && makeSerializer !== undefined) {

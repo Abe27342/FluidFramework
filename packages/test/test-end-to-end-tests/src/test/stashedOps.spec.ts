@@ -827,15 +827,12 @@ describeNoCompat("stashed ops", (getTestObjectProvider) => {
 			);
 			id = dataStore.context.id;
 
-			const channel = dataStore.runtime.createChannel(
-				newMapId,
-				"https://graph.microsoft.com/types/map",
-			);
+			const channel = SharedMap.create(dataStore.runtime, newMapId);
 			assert.strictEqual(channel.handle.isAttached, false, "Channel should be detached");
 
 			((await channel.handle.get()) as SharedObject).bindToContext();
 			defaultDataStore.root.set("someDataStore", dataStore.handle);
-			(channel as SharedMap).set(testKey, testValue);
+			channel.set(testKey, testValue);
 		});
 
 		const container2 = await loader.resolve({ url }, pendingOps);
@@ -857,15 +854,12 @@ describeNoCompat("stashed ops", (getTestObjectProvider) => {
 			const router = await runtime.createDataStore(["default"]);
 			const dataStore = await requestFluidObject<ITestFluidObject>(router, "/");
 
-			const channel = dataStore.runtime.createChannel(
-				newMapId,
-				"https://graph.microsoft.com/types/map",
-			);
+			const channel = SharedMap.create(dataStore.runtime, newMapId);
 			assert.strictEqual(channel.handle.isAttached, false, "Channel should be detached");
 
 			((await channel.handle.get()) as SharedObject).bindToContext();
 			defaultDataStore.root.set("someDataStore", dataStore.handle);
-			(channel as SharedMap).set(testKey, testValue);
+			channel.set(testKey, testValue);
 		});
 
 		const container2 = await loader.resolve({ url }, pendingOps);
@@ -1232,15 +1226,12 @@ describeNoCompat("stashed ops", (getTestObjectProvider) => {
 			const dataStore = await requestFluidObject<ITestFluidObject>(router, "/");
 			id = dataStore.context.id;
 
-			const channel = dataStore.runtime.createChannel(
-				newMapId,
-				"https://graph.microsoft.com/types/map",
-			);
+			const channel = SharedMap.create(dataStore.runtime, newMapId);
 			assert.strictEqual(channel.handle.isAttached, false, "Channel should be detached");
 
 			((await channel.handle.get()) as SharedObject).bindToContext();
 			defaultDataStore.root.set("someDataStore", dataStore.handle);
-			(channel as SharedMap).set(testKey, testValue);
+			channel.set(testKey, testValue);
 		});
 
 		// load offline; new datastore should be accessible

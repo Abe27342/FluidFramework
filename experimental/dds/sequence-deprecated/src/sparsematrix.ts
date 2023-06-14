@@ -244,7 +244,11 @@ export class SparseMatrix extends SharedSegmentSequence<MatrixSegment> {
 	 * @returns newly create sparse matrix (but not attached yet)
 	 */
 	public static create(runtime: IFluidDataStoreRuntime, id?: string) {
-		return runtime.createChannel(id, SparseMatrixFactory.Type) as SparseMatrix;
+		return runtime.createChannel(
+			id,
+			SparseMatrixFactory.Type,
+			SparseMatrixFactory.Attributes,
+		) as SparseMatrix;
 	}
 
 	/**

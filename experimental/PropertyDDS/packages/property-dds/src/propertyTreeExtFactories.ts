@@ -11,6 +11,7 @@ import {
 	IFluidDataStoreRuntime,
 	IChannelServices,
 	IChannelFactory,
+	IConfigurableChannelAttributes,
 } from "@fluidframework/datastore-definitions";
 import {
 	IPropertyTreeConfig,
@@ -104,7 +105,7 @@ export abstract class CompressedPropertyTreeFactory implements IChannelFactory {
 	public create(
 		document: IFluidDataStoreRuntime,
 		id: string,
-		requestUrl?: string,
+		params: IConfigurableChannelAttributes,
 	): SharedPropertyTree {
 		const options = {};
 		const cell = this.newPropertyTree(
@@ -141,9 +142,9 @@ export class DeflatedPropertyTreeFactory extends CompressedPropertyTreeFactory {
 	public create(
 		document: IFluidDataStoreRuntime,
 		id: string,
-		requestUrl?: string,
+		params: IConfigurableChannelAttributes,
 	): DeflatedPropertyTree {
-		return super.create(document, id, requestUrl);
+		return super.create(document, id, params);
 	}
 
 	public get type() {
@@ -193,9 +194,9 @@ export class LZ4PropertyTreeFactory extends CompressedPropertyTreeFactory {
 	public create(
 		document: IFluidDataStoreRuntime,
 		id: string,
-		requestUrl?: string,
+		params: IConfigurableChannelAttributes,
 	): LZ4PropertyTree {
-		return super.create(document, id, requestUrl);
+		return super.create(document, id, params);
 	}
 
 	public get type() {

@@ -104,10 +104,8 @@ describeNoCompat(`Attach/Reference Api Tests For Attached Container`, (getTestOb
 		);
 
 		// Create a channel
-		const channel = dataStore2.runtime.createChannel(
-			"test1",
-			"https://graph.microsoft.com/types/map",
-		);
+		const channel = SharedMap.create(dataStore2.runtime, "test1");
+
 		assert.strictEqual(channel.handle.isAttached, false, "Channel should be detached");
 
 		defaultDataStore.root.set("dataStore2", dataStore2.handle);
@@ -139,10 +137,8 @@ describeNoCompat(`Attach/Reference Api Tests For Attached Container`, (getTestOb
 		);
 
 		// Create a channel
-		const channel = dataStore2.runtime.createChannel(
-			"test1",
-			"https://graph.microsoft.com/types/map",
-		);
+		const channel = SharedMap.create(dataStore2.runtime, "test1");
+
 		assert.strictEqual(channel.handle.isAttached, false, "Channel should be detached");
 
 		// Now register the channel
@@ -177,10 +173,8 @@ describeNoCompat(`Attach/Reference Api Tests For Attached Container`, (getTestOb
 		);
 
 		// Create a channel
-		const channel = dataStore2.runtime.createChannel(
-			"test1",
-			"https://graph.microsoft.com/types/map",
-		);
+		const channel = SharedMap.create(dataStore2.runtime, "test1");
+
 		assert.strictEqual(channel.handle.isAttached, false, "Channel should be detached");
 
 		channel.handle.attachGraph();
@@ -212,10 +206,8 @@ describeNoCompat(`Attach/Reference Api Tests For Attached Container`, (getTestOb
 		);
 
 		// Create a channel
-		const channel = dataStore2.runtime.createChannel(
-			"test1",
-			"https://graph.microsoft.com/types/map",
-		);
+		const channel = SharedMap.create(dataStore2.runtime, "test1");
+
 		assert.strictEqual(channel.handle.isAttached, false, "Channel should be detached");
 
 		defaultDataStore.root.set("dataStore2", dataStore2.handle);
@@ -254,10 +246,8 @@ describeNoCompat(`Attach/Reference Api Tests For Attached Container`, (getTestOb
 		);
 
 		// Create a channel
-		const channel = dataStore2.runtime.createChannel(
-			"test1",
-			"https://graph.microsoft.com/types/map",
-		);
+		const channel = SharedMap.create(dataStore2.runtime, "test1");
+
 		assert.strictEqual(channel.handle.isAttached, false, "Channel should be detached");
 
 		defaultDataStore.root.set("dataStore2", dataStore2.handle);
@@ -286,10 +276,8 @@ describeNoCompat(`Attach/Reference Api Tests For Attached Container`, (getTestOb
 		);
 
 		// Create a channel
-		const channel = dataStore2.runtime.createChannel(
-			"test1",
-			"https://graph.microsoft.com/types/map",
-		);
+		const channel = SharedMap.create(dataStore2.runtime, "test1");
+
 		assert.strictEqual(channel.handle.isAttached, false, "Channel should be detached");
 
 		((await channel.handle.get()) as SharedObject).bindToContext();
@@ -315,17 +303,13 @@ describeNoCompat(`Attach/Reference Api Tests For Attached Container`, (getTestOb
 		);
 
 		// Create first channel
-		const channel1 = dataStore2.runtime.createChannel(
-			"test1",
-			"https://graph.microsoft.com/types/map",
-		);
+		const channel1 = SharedMap.create(dataStore2.runtime, "test1");
+
 		assert.strictEqual(channel1.handle.isAttached, false, "Channel should be detached");
 
 		// Create second channel
-		const channel2 = dataStore2.runtime.createChannel(
-			"test2",
-			"https://graph.microsoft.com/types/map",
-		);
+		const channel2 = SharedMap.create(dataStore2.runtime, "test2");
+
 		assert.strictEqual(channel2.handle.isAttached, false, "Channel should be detached");
 
 		// Now register both dds to parent dataStore
@@ -372,17 +356,13 @@ describeNoCompat(`Attach/Reference Api Tests For Attached Container`, (getTestOb
 		);
 
 		// Create first channel
-		const channel1 = dataStore2.runtime.createChannel(
-			"test1",
-			"https://graph.microsoft.com/types/map",
-		);
+		const channel1 = SharedMap.create(dataStore2.runtime, "test1");
+
 		assert.strictEqual(channel1.handle.isAttached, false, "Channel should be detached");
 
 		// Create second channel
-		const channel2 = dataStore2.runtime.createChannel(
-			"test2",
-			"https://graph.microsoft.com/types/map",
-		);
+		const channel2 = SharedMap.create(dataStore2.runtime, "test2");
+
 		assert.strictEqual(channel2.handle.isAttached, false, "Channel should be detached");
 
 		// Now register both dds to parent dataStore
@@ -441,17 +421,12 @@ describeNoCompat(`Attach/Reference Api Tests For Attached Container`, (getTestOb
 			);
 
 			// Create first channel from dataStore2
-			const channel2 = dataStore2.runtime.createChannel(
-				"test1",
-				"https://graph.microsoft.com/types/map",
-			);
+			const channel2 = SharedMap.create(dataStore2.runtime, "test1");
+
 			assert.strictEqual(channel2.handle.isAttached, false, "Channel should be detached");
 
 			// Create second channel from dataStore 3
-			const channel3 = dataStore3.runtime.createChannel(
-				"test2",
-				"https://graph.microsoft.com/types/map",
-			);
+			const channel3 = SharedMap.create(dataStore3.runtime, "test2");
 			assert.strictEqual(channel3.handle.isAttached, false, "Channel should be detached");
 
 			const testChannelOfDataStore2 = (await dataStore2.runtime.getChannel(

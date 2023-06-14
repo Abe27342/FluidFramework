@@ -147,7 +147,11 @@ export class SharedMatrix<T = any>
 	 * {@inheritDoc @fluidframework/datastore-definitions#IChannelFactory.create}
 	 */
 	public static create<T>(runtime: IFluidDataStoreRuntime, id?: string) {
-		return runtime.createChannel(id, SharedMatrixFactory.Type) as SharedMatrix<T>;
+		return runtime.createChannel(
+			id,
+			SharedMatrixFactory.Type,
+			SharedMatrixFactory.Attributes,
+		) as SharedMatrix<T>;
 	}
 
 	// #region IMatrixProducer

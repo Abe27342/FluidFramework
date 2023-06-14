@@ -30,7 +30,11 @@ describe("SharedCounter", () => {
 	beforeEach(async () => {
 		dataStoreRuntime = new MockFluidDataStoreRuntime();
 		factory = SharedCounter.getFactory();
-		testCounter = factory.create(dataStoreRuntime, "counter") as ISharedCounter;
+		testCounter = factory.create(
+			dataStoreRuntime,
+			"counter",
+			CounterFactory.Attributes,
+		) as ISharedCounter;
 	});
 
 	describe("SharedCounter in local state", () => {
@@ -106,7 +110,11 @@ describe("SharedCounter", () => {
 				const services = MockSharedObjectServices.createFromSummary(
 					testCounter.getAttachSummary().summary,
 				);
-				const testCounter2 = factory.create(dataStoreRuntime, "counter2") as SharedCounter;
+				const testCounter2 = factory.create(
+					dataStoreRuntime,
+					"counter2",
+					CounterFactory.Attributes,
+				) as SharedCounter;
 				await testCounter2.load(services);
 
 				// Verify that the new SharedCounter has the correct value.
@@ -145,7 +153,11 @@ describe("SharedCounter", () => {
 				objectStorage: new MockStorage(),
 			};
 
-			testCounter2 = factory.create(dataStoreRuntime, "counter2") as SharedCounter;
+			testCounter2 = factory.create(
+				dataStoreRuntime,
+				"counter2",
+				CounterFactory.Attributes,
+			) as SharedCounter;
 			testCounter2.connect(services2);
 		});
 
@@ -229,7 +241,11 @@ describe("SharedCounter", () => {
 				objectStorage: new MockStorage(),
 			};
 
-			testCounter2 = factory.create(dataStoreRuntime, "counter2") as SharedCounter;
+			testCounter2 = factory.create(
+				dataStoreRuntime,
+				"counter2",
+				CounterFactory.Attributes,
+			) as SharedCounter;
 			testCounter2.connect(services2);
 		});
 

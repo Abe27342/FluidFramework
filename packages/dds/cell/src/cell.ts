@@ -68,7 +68,7 @@ export class SharedCell<T = any>
 	 * @returns The newly create `SharedCell`. Note that it will not yet be attached.
 	 */
 	public static create(runtime: IFluidDataStoreRuntime, id?: string): SharedCell {
-		return runtime.createChannel(id, CellFactory.Type) as SharedCell;
+		return runtime.createChannel(id, CellFactory.Type, CellFactory.Attributes) as SharedCell;
 	}
 
 	/**

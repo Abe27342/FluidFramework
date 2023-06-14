@@ -26,9 +26,11 @@ export class Bubblebench extends DataObject {
 	private _appState: AppState | undefined;
 
 	protected async initializingFirstTime() {
+		const factory = new SharedTreeFactory();
 		const tree = this.runtime.createChannel(
 			/* id: */ undefined,
-			new SharedTreeFactory().type,
+			factory.type,
+			factory.attributes,
 		) as ISharedTree;
 
 		this.initializeTree(tree);

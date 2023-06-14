@@ -91,7 +91,11 @@ export class SharedCounter extends SharedObject<ISharedCounterEvents> implements
 	 * @returns newly create shared counter (but not attached yet)
 	 */
 	public static create(runtime: IFluidDataStoreRuntime, id?: string): SharedCounter {
-		return runtime.createChannel(id, CounterFactory.Type) as SharedCounter;
+		return runtime.createChannel(
+			id,
+			CounterFactory.Type,
+			CounterFactory.Attributes,
+		) as SharedCounter;
 	}
 
 	public constructor(
