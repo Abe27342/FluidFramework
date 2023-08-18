@@ -623,6 +623,11 @@ export function remove(tree: ISharedTreeView, index: number, count: number): voi
 	field.delete(index, count);
 }
 
+export function move(tree: ISharedTreeView, index: number, count: number, destIndex: number): void {
+	const field = tree.editor.sequenceField({ parent: undefined, field: rootFieldKey });
+	field.move(index, count, destIndex);
+}
+
 export function expectJsonTree(
 	actual: ISharedTreeView | ISharedTreeView[],
 	expected: JsonCompatible[],

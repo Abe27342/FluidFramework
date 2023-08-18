@@ -10,6 +10,15 @@ import { ChangeRebaser, TaggedChange, tagRollbackInverse } from "./changeRebaser
 import { GraphCommit, mintRevisionTag, mintCommit } from "./types";
 
 /**
+ * Setting this to true modified `rebaseOnto` to assume that edits always commute in sandwich rebasing, i.e.
+ * B rebased over [A^-1, T, A'] is equivalent to B rebased over [T] since A^-1 commutes with T.
+ *
+ * This is not currently true for many edits, but is for some (which is enough to get a more concrete idea
+ * of how this optimization could impact perf).
+ */
+let assumeCommutative = true;
+
+/**
  * Contains information about how the commit graph changed as the result of rebasing a source branch onto another target branch.
  * @remarks
  * ```text
@@ -230,6 +239,7 @@ export function rebaseBranch<TChange>(
 		];
 	}
 
+	const tailEdits: GraphCommit<TChange>[] = [];
 	let newHead = newBase;
 	const inverses: TaggedChange<TChange>[] = [];
 	if (sourcePath.length !== 0) {
@@ -255,10 +265,11 @@ export function rebaseBranch<TChange>(
 		// rebase forwards over the rest of the commits up to the new base before advancing the new base.
 		for (const c of sourcePath) {
 			if (sourceSet.has(c.revision)) {
-				const change = rebaseChangeOverChanges(changeRebaser, c.change, [
-					...inverses,
-					...targetRebasePath,
-				]);
+				const change = rebaseChangeOverChanges(
+					changeRebaser,
+					c.change,
+					assumeCommutative ? [...targetRebasePath] : [...inverses, ...targetRebasePath],
+				);
 				const repairData = repairDataStoreProviderClone?.createRepairData();
 				repairData?.capture(change, c.revision);
 				newHead = {
@@ -268,24 +279,30 @@ export function rebaseBranch<TChange>(
 					repairData,
 				};
 				sourceCommits.push(newHead);
-				targetRebasePath.push({ ...c, change });
+				(assumeCommutative ? tailEdits : targetRebasePath).push({ ...c, change });
 				repairDataStoreProviderClone?.applyChange(change);
 			}
 
-			inverses.unshift(
-				tagRollbackInverse(
-					nonTaggedInverses.pop() ??
-						fail("The commits in source path should not be modified."),
-					mintRevisionTag(),
-					c.revision,
-				),
-			);
+			if (!assumeCommutative) {
+				inverses.unshift(
+					tagRollbackInverse(
+						nonTaggedInverses.pop() ??
+							fail("The commits in source path should not be modified."),
+						mintRevisionTag(),
+						c.revision,
+					),
+				);
+			}
 		}
 	}
 
 	return [
 		newHead,
-		changeRebaser.compose([...inverses, ...targetRebasePath]),
+		changeRebaser.compose(
+			assumeCommutative
+				? [...targetRebasePath, ...tailEdits]
+				: [...inverses, ...targetRebasePath],
+		),
 		{
 			deletedSourceCommits,
 			targetCommits,
@@ -317,6 +334,8 @@ export function rebaseChange<TChange>(
 		0x576 /* branch A and branch B must be related */,
 	);
 
+	callsToRebaseRemoteChange += sourcePath.length + targetPath.length;
+
 	const changeRebasedToRef = sourcePath.reduceRight(
 		(newChange, branchCommit) =>
 			changeRebaser.rebase(
@@ -329,11 +348,24 @@ export function rebaseChange<TChange>(
 	return targetPath.reduce((a, b) => changeRebaser.rebase(a, b), changeRebasedToRef);
 }
 
+let callsToRebaseRemoteChange = 0;
+
+let callsToRebaseChange = 0;
+export function resetCallsToRebase(): void {
+	callsToRebaseChange = 0;
+	callsToRebaseRemoteChange = 0;
+}
+
+export function getCallsToRebase() {
+	return { callsToRebaseChange, callsToRebaseRemoteChange };
+}
+
 function rebaseChangeOverChanges<TChange>(
 	changeRebaser: ChangeRebaser<TChange>,
 	changeToRebase: TChange,
 	changesToRebaseOver: TaggedChange<TChange>[],
 ) {
+	callsToRebaseChange += changesToRebaseOver.length;
 	return changesToRebaseOver.reduce((a, b) => changeRebaser.rebase(a, b), changeToRebase);
 }
 

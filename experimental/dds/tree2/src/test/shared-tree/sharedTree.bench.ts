@@ -18,10 +18,12 @@ import {
 } from "../../feature-libraries";
 import { jsonNumber, jsonSchema, singleJsonCursor } from "../../domains";
 import { brand, requireAssignableTo } from "../../util";
-import { insert, TestTreeProviderLite, toJsonableTree } from "../utils";
+import { insert, move, remove, TestTreeProviderLite, toJsonableTree } from "../utils";
 import { typeboxValidator } from "../../external-utilities";
 import { ISharedTree, ISharedTreeView, SharedTreeFactory } from "../../shared-tree";
 import { AllowedUpdateType, FieldKey, moveToDetachedField, rootFieldKey, UpPath } from "../../core";
+import { beforeEach } from "mocha";
+import { getCallsToRebase, resetCallsToRebase } from "../../core/rebase/utils";
 
 const localFieldKey: FieldKey = brand("foo");
 
@@ -394,7 +396,7 @@ describe("SharedTree benchmarks", () => {
 		}
 	});
 
-	describe("acking local commits", () => {
+	describe.only("acking local commits", () => {
 		const localCommitSize = [1, 25, 100, 500, 1000];
 		for (const size of localCommitSize) {
 			benchmark({
@@ -403,7 +405,7 @@ describe("SharedTree benchmarks", () => {
 				benchmarkFnCustom: async <T>(state: BenchmarkTimer<T>) => {
 					let duration: number;
 					do {
-						// Since this setup one collects data from one iteration, assert that this is what is expected.
+						// Since this setup only collects data from one iteration, assert that this is what is expected.
 						assert.equal(state.iterationsPerBatch, 1);
 
 						// Setup
@@ -427,15 +429,27 @@ describe("SharedTree benchmarks", () => {
 		}
 	});
 
+	beforeEach(() => {
+		resetCallsToRebase();
+	});
+
 	// Note that this runs the computation for several peers.
 	// In practice, this computation is distributed across peers, so the actual time reported is
 	// divided by the number of peers.
-	describe("rebasing commits", () => {
-		const commitCounts = [1, 10, 20];
-		const nbPeers = 5;
+	describe.only("rebasing commits", () => {
+		const commitCounts = [1, 2, 3, 4, 5, 10];
+		const nbPeers = 4;
 		for (const nbCommits of commitCounts) {
 			benchmark({
 				type: BenchmarkType.Measurement,
+				// Number of rebases performed for this test across all clients is
+				// nbPeers * (nbPeers-1)/2 * (1/3 * (2 * nbCommits^3 + nbCommits) + 5*nbCommits^2 - 3*nbCommits + 1)
+				// In fast path, 2nd factor is unchanged (determined by processing remote edits, but we can't use commutativity here)
+				// First peer factor is reduced from 1/3 * (2 * nbCommits^3 + nbCommits) to nbCommits^2
+				// this suggests roughly 50-70k rebases per second on my machine in rebase-dominated code.
+				// Also worth noting that ratios between benchmark time is approximately correct with ratios
+				// between number of rebases done (at least true for higher counts, where we expect number of rebases
+				// to be the dominating factor)
 				title: `for ${nbCommits} commits per peer for ${nbPeers} peers`,
 				benchmarkFnCustom: async <T>(state: BenchmarkTimer<T>) => {
 					let duration: number;
@@ -456,6 +470,141 @@ describe("SharedTree benchmarks", () => {
 						const before = state.timer.now();
 						provider.processMessages();
 						const after = state.timer.now();
+
+						const { callsToRebaseChange, callsToRebaseRemoteChange } =
+							getCallsToRebase();
+						console.log(
+							`${nbCommits},${callsToRebaseChange},${callsToRebaseRemoteChange}`,
+						); // Divide the duration by the number of peers so we get the average time per peer.
+						duration = state.timer.toSeconds(before, after) / nbPeers;
+					} while (state.recordBatch(duration));
+				},
+				// Force batch size of 1
+				minBatchDurationSeconds: 0,
+			});
+		}
+
+		for (const nbCommits of commitCounts) {
+			benchmark({
+				type: BenchmarkType.Measurement,
+				// Number of rebases performed for this test across all clients:
+				// nbPeers * (nbPeers - 1)/2 * nbCommits^3
+				// + same peerfactor * 1/2 * (3*nbCommits * (3*nbCommits - 1))
+				// In fast path, 2nd factor is unchanged (determined by processing remote edits, but we can't use commutativity here)
+				// First peer factor is reduced from nbCommits^3 to nbCommits^2
+				title: `for ${nbCommits} commits per peer for ${nbPeers} peers, not interwoven`,
+				benchmarkFnCustom: async <T>(state: BenchmarkTimer<T>) => {
+					let duration: number;
+					do {
+						// Since this setup one collects data from one iteration, assert that this is what is expected.
+						assert.equal(state.iterationsPerBatch, 1);
+
+						// Setup
+						const provider = new TestTreeProviderLite(nbPeers);
+						for (let iPeer = 0; iPeer < nbPeers; iPeer++) {
+							for (let iCommit = 0; iCommit < nbCommits; iCommit++) {
+								const peer = provider.trees[iPeer];
+								insert(peer, 0, `p${iPeer}c${iCommit}`);
+							}
+						}
+
+						// Measure
+						const before = state.timer.now();
+						provider.processMessages();
+						const after = state.timer.now();
+
+						const { callsToRebaseChange, callsToRebaseRemoteChange } =
+							getCallsToRebase();
+						console.log(
+							`${nbCommits},${callsToRebaseChange},${callsToRebaseRemoteChange}`,
+						); // Divide the duration by the number of peers so we get the average time per peer.
+						duration = state.timer.toSeconds(before, after) / nbPeers;
+					} while (state.recordBatch(duration));
+				},
+				// Force batch size of 1
+				minBatchDurationSeconds: 0,
+			});
+		}
+
+		for (const nbCommits of commitCounts) {
+			benchmark({
+				type: BenchmarkType.Measurement,
+				title: `for ${nbCommits} commits per peer for ${nbPeers} peers, deleting, not interwoven`,
+				benchmarkFnCustom: async <T>(state: BenchmarkTimer<T>) => {
+					let duration: number;
+					do {
+						// Since this setup one collects data from one iteration, assert that this is what is expected.
+						assert.equal(state.iterationsPerBatch, 1);
+
+						// Setup
+						const provider = new TestTreeProviderLite(nbPeers);
+						insert(
+							provider.trees[0],
+							0,
+							...Array.from({ length: nbPeers * nbCommits }, () => "a"),
+						);
+						provider.processMessages();
+						for (let iPeer = 0; iPeer < nbPeers; iPeer++) {
+							for (let iCommit = 0; iCommit < nbCommits; iCommit++) {
+								const peer = provider.trees[iPeer];
+								remove(peer, iPeer * nbCommits, 1);
+							}
+						}
+
+						// Measure
+						const before = state.timer.now();
+						provider.processMessages();
+						const after = state.timer.now();
+
+						const { callsToRebaseChange, callsToRebaseRemoteChange } =
+							getCallsToRebase();
+						console.log(
+							`${nbCommits},${callsToRebaseChange},${callsToRebaseRemoteChange}`,
+						);
+						// Divide the duration by the number of peers so we get the average time per peer.
+						duration = state.timer.toSeconds(before, after) / nbPeers;
+					} while (state.recordBatch(duration));
+				},
+				// Force batch size of 1
+				minBatchDurationSeconds: 0,
+			});
+		}
+
+		for (const nbCommits of commitCounts) {
+			benchmark({
+				type: BenchmarkType.Measurement,
+				title: `for ${nbCommits} commits per peer for ${nbPeers} peers, moving, not interwoven`,
+				benchmarkFnCustom: async <T>(state: BenchmarkTimer<T>) => {
+					let duration: number;
+					do {
+						// Since this setup one collects data from one iteration, assert that this is what is expected.
+						assert.equal(state.iterationsPerBatch, 1);
+
+						// Setup
+						const provider = new TestTreeProviderLite(nbPeers);
+						insert(
+							provider.trees[0],
+							0,
+							...Array.from({ length: nbPeers * nbCommits }, () => "a"),
+						);
+						provider.processMessages();
+						for (let iPeer = 0; iPeer < nbPeers; iPeer++) {
+							for (let iCommit = 0; iCommit < nbCommits; iCommit++) {
+								const peer = provider.trees[iPeer];
+								move(peer, iPeer * nbCommits, 1, (iPeer + 1) * nbCommits - 1);
+							}
+						}
+
+						// Measure
+						const before = state.timer.now();
+						provider.processMessages();
+						const after = state.timer.now();
+
+						const { callsToRebaseChange, callsToRebaseRemoteChange } =
+							getCallsToRebase();
+						console.log(
+							`${nbCommits},${callsToRebaseChange},${callsToRebaseRemoteChange}`,
+						);
 						// Divide the duration by the number of peers so we get the average time per peer.
 						duration = state.timer.toSeconds(before, after) / nbPeers;
 					} while (state.recordBatch(duration));
