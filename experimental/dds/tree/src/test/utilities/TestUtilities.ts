@@ -678,11 +678,11 @@ export async function waitForSummary(mainContainer: IContainer): Promise<string>
 export async function withContainerOffline<TReturn>(
 	provider: ITestObjectProvider,
 	container: IContainerExperimental,
-	action: () => TReturn
+	action: () => Promise<TReturn>
 ): Promise<{ actionReturn: TReturn; pendingLocalState: string }> {
 	await provider.ensureSynchronized();
 	await provider.opProcessingController.pauseProcessing(container);
-	const actionReturn = action();
+	const actionReturn = await action();
 	const pendingLocalState = await container.closeAndGetPendingLocalState?.();
 	assert(pendingLocalState !== undefined, 0x726 /* pendingLocalState should be defined */);
 	return { actionReturn, pendingLocalState };

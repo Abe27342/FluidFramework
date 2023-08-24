@@ -85,7 +85,7 @@ export async function performFuzzActions(
 
 				const { container, tree } = state.activeCollaborators[index];
 				await testObjectProvider.ensureSynchronized();
-				const { pendingLocalState } = await withContainerOffline(testObjectProvider, container, () => {
+				const { pendingLocalState } = await withContainerOffline(testObjectProvider, container, async () => {
 					applyFuzzChange(tree, contents);
 				});
 
