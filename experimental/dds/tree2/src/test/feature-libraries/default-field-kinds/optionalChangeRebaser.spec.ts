@@ -328,17 +328,104 @@ then
 
 T----B----C
           |
-		  |---A1_C---rebase(rebase(A2, postbase(B, A1)), postbase(C, A1_B))
+		  |---A1_C---rebase(rebase(A2, postbase(B, A1)), postbase(C, rebase(A1, B)))
 
 then
 
 T----B----C----A1_C
                |
-			   |---rebase(rebase(A2, postbase(B, A1)), postbase(C, A1_B))
+			   |---rebase(rebase(A2, postbase(B, A1)), postbase(C, rebase(A1, B)))
+
+
+Back to main example. Now say we're doing it on a different client:
+
+T----B----C----A1_C
+|    |
+|    |---A1_B
+|
+|---A1----A2
+
+We want to shift A2 toward the top branch. To do so, we need it to account for commits B and C.
+Objective: rebase over B-intent, then over C-intent.
+Sub-objective: put B-intent in context A2 can rebase over: postbase(B, A1)
+then A2_B := rebase(A2, postbase(B, A1)).
+
+This creates
+
+T----B----C----A1_C
+|    |
+|    |---A1_B---A2_B
+|
+|---A1----A2
+
+Now we want to rebase this over C-intent. To do so, we first need to put C-intent in context A2_B can rebase over: postbase(C, A1_B)
+
+then:
+
+rebase(rebase(A2, postbase(B, A1)), postbase(C, rebase(A1, B)))
 
 Key assumption with postbase: An edit which can be applied to the context [B, A1_B] can also be applied to the context [A1, B^A1]
-So rather than compute A2 by rebase sandwich, we can postbase B over A1 
-	 */
+So rather than compute A2 by rebase sandwich, we can postbase B over A1
+
+
+Small aside: what about 3 local edits?
+
+T---B
+|
+|---A1---A2---A3
+
+T----B
+|    |
+|    |---A1_B---rebase(A2, postbase(B, A1))---rebase(A3, postbase(postbase(B, A1), A2))
+|
+|---A1---A2---A3
+
+
+
+Say:
+
+A0----A1----A2----...---An
+|
+|----B1----B2----...----Bm
+
+and we want to merge branch B into branch A.
+
+Define:
+
+B1_A0 := B1
+B1_Ai := rebase(B1_A{i-1}, Ai)
+
+B2_A0 := B2
+B2_A1 := rebase(B2_A0, postbase(A1, B1_A0))
+B2_A2 := rebase(B2_A1, postbase(A2, B1_A1))
+B2_A3 := rebase(B2_A2, postbase(A3, B1_A2))
+B2_Ai := rebase(B2_A{i-1}, postbase(Ai, B1_A{i-1}))
+
+
+B3_A0 := B3
+B3_A1 := rebase(B3_A0, postbase(postbase(A1, B1_A0), B2_A0))
+rebase(B1, A1)
+
+actually, stop.
+
+Maybe better goal is to say:
+
+A0----A1
+|
+|----B1----B2----...----Bm
+
+and aim to merge B into A. If we repeat that process n-1 more times, we can do the original scenario correctly.
+
+B1_A1 = rebase(B1, A1)
+B2_A1 = rebase(B2, postbase(A1, B1))
+B3_A1 = rebase(B3, postbase(postbase(A1, B1), B2))
+
+in general, let:
+
+pA1 := A1
+pAk := postbase(pA{k-1}, B{k-1})
+Bk_A1 := rebase(Bk, pAk)
+*/
 	describe.skip("postbase", () => {
 		for (const [name1, untaggedChange1] of testChanges) {
 			for (const [name2, untaggedChange2] of testChanges) {

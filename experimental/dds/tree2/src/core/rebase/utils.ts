@@ -184,6 +184,8 @@ export function rebaseBranch<TChange>(
 
 	for (let i = 0; i < targetPath.length; i += 1) {
 		const { revision } = targetPath[i];
+		// TODO: Do we meaningfully use the eliding of commits that have been rebased in the middle?
+		// If so, we need to figure out how to make this make sense in a postbase world.
 		if (sourceSet.has(revision)) {
 			sourceSet.delete(revision);
 			newBaseIndex = Math.max(newBaseIndex, i);
@@ -230,6 +232,28 @@ export function rebaseBranch<TChange>(
 		];
 	}
 
+	// TOOD: Repair data, handling case where element of targetPath is present in sourcePath
+	let baseSourcePath: TChange[] = sourcePath.map((commit) => commit.change);
+	// TODO: Work out how change tagging works.
+	// TODO: Construct proper graph commits out of this.
+	let rebasedSourcePath: TChange[] = [];
+	// Rebase over the target path one edit at a time.
+	for (const target of targetPath) {
+		let postbasedEdit = target;
+		for (const sourceCommit of baseSourcePath) {
+			// Need to push a commit with the same intent as `sourceCommit` but accounting for changes due to
+			// `target`.
+			const rebasedSource = changeRebaser.rebase(sourceCommit, postbasedEdit);
+			// To make the next rebase valid, we need to rebase over a change with the same intent as `target` but
+			// based on the current source commit.
+			postBasedEdit = changeRebaser.rebase(postbasedEdit, sourceCommit, true);
+			rebasedSourcePath.push(rebasedSource);
+		}
+
+		baseSourcePath = rebasedSourcePath;
+		rebasedSourcePath = [];
+	}
+
 	let newHead = newBase;
 	const inverses: TaggedChange<TChange>[] = [];
 	if (sourcePath.length !== 0) {
@@ -251,6 +275,28 @@ export function rebaseBranch<TChange>(
 			}
 		}
 
+		/**
+ * Maybe better goal is to say:
+
+A0----A1
+|
+|----B1----B2----...----Bm
+
+and aim to merge B into A. If we repeat that process n-1 more times, we can do the original scenario correctly.
+
+B1_A1 = rebase(B1, A1)
+B2_A1 = rebase(B2, postbase(A1, B1))
+B3_A1 = rebase(B3, postbase(postbase(A1, B1), B2))
+
+in general, let:
+
+pA1 := A1
+pAk := postbase(pA{k-1}, B{k-1})
+Bk_A1 := rebase(Bk, pAk)
+
+ */
+
+		// TODO: Update
 		// For each source commit, rebase backwards over the inverses of any commits already rebased, and then
 		// rebase forwards over the rest of the commits up to the new base before advancing the new base.
 		for (const c of sourcePath) {
@@ -294,6 +340,7 @@ export function rebaseBranch<TChange>(
 	];
 }
 
+// TODO: update
 /**
  * "Sandwich/Horseshoe Rebase" a change over the given source and target branches
  * @param changeRebaser - the change rebaser responsible for rebasing the change over the commits in each branch
