@@ -5,7 +5,8 @@
 
 import { makeRandom } from "@fluid-internal/stochastic-test-utils";
 import { unreachableCase } from "@fluidframework/common-utils";
-import { ChangeRebaser, makeAnonChange } from "../../core";
+import { ChangeRebaser, makeAnonChange, tagChange } from "../../core";
+import { StableId } from "@fluidframework/runtime-definitions";
 
 enum Operation {
 	Rebase = 0,
@@ -33,7 +34,8 @@ export function generateFuzzyCombinedChange<TChange>(
 	const compose = rebaser.compose.bind(rebaser);
 	const invert = rebaser.invert.bind(rebaser);
 
-	let change = changeGenerator(seed);
+	const revision = random.uuid4() as StableId;
+	let change = tagChange(changeGenerator(seed), revision);
 
 	// Rules for combining changes:
 	// - We must not combine a change with itself
@@ -48,18 +50,18 @@ export function generateFuzzyCombinedChange<TChange>(
 				change = rebase(change, makeAnonChange(changeGenerator(random.real())));
 				break;
 			case Operation.Compose:
-				change = compose([
-					makeAnonChange(change),
-					makeAnonChange(changeGenerator(random.real())),
-				]);
+				change = tagChange(
+					compose([change, makeAnonChange(changeGenerator(random.real()))]),
+					revision,
+				);
 				break;
 			case Operation.Invert:
 				// TODO: test rollback inversions as well
-				change = invert(makeAnonChange(change), false);
+				change = tagChange(invert(change, false), revision);
 				break;
 			default:
 				unreachableCase(operation);
 		}
 	}
-	return change;
+	return change.change;
 }

@@ -51,7 +51,10 @@ import { ValueChangeset, valueField } from "./basicRebasers";
 const singleNodeRebaser: FieldChangeRebaser<NodeChangeset> = {
 	compose: (changes, composeChild) => composeChild(changes),
 	invert: (change, invertChild) => invertChild(change.change, 0),
-	rebase: (change, base, rebaseChild) => rebaseChild(change, base.change) ?? {},
+	rebase: (change, base, rebaseChild) => ({
+		...change,
+		change: rebaseChild(change.change, base.change) ?? {},
+	}),
 	amendCompose: () => fail("Not supported"),
 	amendInvert: () => fail("Not supported"),
 	amendRebase: (change, base, rebaseChild) => change,
@@ -556,28 +559,33 @@ describe("ModularChangeFamily", () => {
 	describe("rebase", () => {
 		it("rebase specific ↷ specific", () => {
 			assert.deepEqual(
-				family.rebase(rootChange1b, makeAnonChange(rootChange1a)),
+				family.rebase(makeAnonChange(rootChange1b), makeAnonChange(rootChange1a)).change,
 				rootChange2,
 			);
 		});
 
 		it("rebase specific ↷ generic", () => {
 			assert.deepEqual(
-				family.rebase(rootChange1b, makeAnonChange(rootChange1aGeneric)),
+				family.rebase(makeAnonChange(rootChange1b), makeAnonChange(rootChange1aGeneric))
+					.change,
 				rootChange2,
 			);
 		});
 
 		it("rebase generic ↷ specific", () => {
 			assert.deepEqual(
-				family.rebase(rootChange1bGeneric, makeAnonChange(rootChange1a)),
+				family.rebase(makeAnonChange(rootChange1bGeneric), makeAnonChange(rootChange1a))
+					.change,
 				rootChange2,
 			);
 		});
 
 		it("rebase generic ↷ generic", () => {
 			assert.deepEqual(
-				family.rebase(rootChange1bGeneric, makeAnonChange(rootChange1aGeneric)),
+				family.rebase(
+					makeAnonChange(rootChange1bGeneric),
+					makeAnonChange(rootChange1aGeneric),
+				).change,
 				rootChange2Generic,
 			);
 		});
@@ -699,13 +707,13 @@ describe("ModularChangeFamily", () => {
 
 		let rebaseWasTested = false;
 		const rebase: FieldChangeRebaser<RevisionTag[]>["rebase"] = (
-			change: RevisionTag[],
+			change: TaggedChange<RevisionTag[]>,
 			over: TaggedChange<RevisionTag[]>,
 			rebaseChild,
 			genId,
 			crossFieldManager,
 			{ getIndex, getInfo },
-		): RevisionTag[] => {
+		): TaggedChange<RevisionTag[]> => {
 			const relevantRevisions = [rev1, rev2, rev4];
 			const revsIndices: number[] = relevantRevisions.map((c) => getIndex(c));
 			const revsInfos: RevisionInfo[] = relevantRevisions.map((c) => getInfo(c));
@@ -791,7 +799,7 @@ describe("ModularChangeFamily", () => {
 		];
 		assert.deepEqual(composed.revisions, expectedComposeInfo);
 		assert(composeWasTested);
-		const rebased = dummyFamily.rebase(changeC, makeAnonChange(changeA));
+		const rebased = dummyFamily.rebase(makeAnonChange(changeC), makeAnonChange(changeA)).change;
 		const expectedRebaseInfo: RevisionInfo[] = [{ revision: rev4, rollbackOf: rev2 }];
 		assert.deepEqual(rebased.revisions, expectedRebaseInfo);
 		assert(rebaseWasTested);

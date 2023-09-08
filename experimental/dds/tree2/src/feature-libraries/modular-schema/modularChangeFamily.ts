@@ -430,9 +430,10 @@ export class ModularChangeFamily
 	}
 
 	public rebase(
-		change: ModularChangeset,
+		changeTagged: TaggedChange<ModularChangeset>,
 		over: TaggedChange<ModularChangeset>,
-	): ModularChangeset {
+	): TaggedChange<ModularChangeset> {
+		const change = changeTagged.change;
 		const maxId = Math.max(change.maxId ?? -1, over.change.maxId ?? -1);
 		const idState: IdAllocationState = { maxId: brand(maxId) };
 		const genId: IdAllocator = idAllocatorFromState(idState);
@@ -444,14 +445,13 @@ export class ModularChangeFamily
 		};
 
 		const constraintState = newConstraintState(change.constraintViolationCount ?? 0);
-		const revInfos: RevisionInfo[] = [];
-		revInfos.push(...revisionInfoFromTaggedChange(over));
-		if (change.revisions !== undefined) {
-			revInfos.push(...change.revisions);
-		}
+		const revInfos: RevisionInfo[] = [
+			...revisionInfoFromTaggedChange(over),
+			...revisionInfoFromTaggedChange(changeTagged),
+		];
 		const revisionMetadata: RevisionMetadataSource = revisionMetadataSourceFromInfo(revInfos);
 		const rebasedFields = this.rebaseFieldMap(
-			change.fieldChanges,
+			tagChange(change.fieldChanges, changeTagged.revision),
 			tagChange(over.change.fieldChanges, over.revision),
 			genId,
 			crossFieldTable,
@@ -472,7 +472,7 @@ export class ModularChangeFamily
 
 		crossFieldTable.invalidatedFields.clear();
 		const amendedFields = this.rebaseFieldMap(
-			rebasedChangeset.fieldChanges,
+			tagChange(rebasedChangeset.fieldChanges, changeTagged.revision),
 			tagChange(over.change.fieldChanges, over.revision),
 			genId,
 			crossFieldTable,
@@ -499,11 +499,11 @@ export class ModularChangeFamily
 			constraintState.violationCount,
 		);
 
-		return amendedChangeset;
+		return { ...changeTagged, change: amendedChangeset };
 	}
 
 	private rebaseFieldMap(
-		change: FieldChangeMap,
+		changeTagged: TaggedChange<FieldChangeMap>,
 		over: TaggedChange<FieldChangeMap>,
 		genId: IdAllocator,
 		crossFieldTable: RebaseTable,
@@ -513,6 +513,7 @@ export class ModularChangeFamily
 		amend: boolean = false,
 		existenceState: NodeExistenceState = NodeExistenceState.Alive,
 	): FieldChangeMap {
+		const { change } = changeTagged;
 		const rebasedFields: FieldChangeMap = new Map();
 
 		// Rebase fields contained in the base changeset
@@ -540,7 +541,7 @@ export class ModularChangeFamily
 				stateChange: NodeExistenceState | undefined,
 			) =>
 				this.rebaseNodeChange(
-					child,
+					tagChange(child, changeTagged.revision),
 					{ revision, change: baseChild },
 					genId,
 					crossFieldTable,
@@ -554,21 +555,21 @@ export class ModularChangeFamily
 
 			const rebasedField = !amend
 				? fieldKind.changeHandler.rebaser.rebase(
-						fieldChangeset,
+						tagChange(fieldChangeset, changeTagged.revision),
 						taggedBaseChange,
 						rebaseChild,
 						genId,
 						manager,
 						revisionMetadata,
-				  )
+				  ).change
 				: fieldKind.changeHandler.rebaser.amendRebase(
-						fieldChangeset,
+						tagChange(fieldChangeset, changeTagged.revision),
 						taggedBaseChange,
 						rebaseChild,
 						genId,
 						manager,
 						revisionMetadata,
-				  );
+				  ).change;
 
 			if (!fieldKind.changeHandler.isEmpty(rebasedField)) {
 				const rebasedFieldChange: FieldChange = {
@@ -602,7 +603,7 @@ export class ModularChangeFamily
 
 				const manager = newCrossFieldManager(crossFieldTable);
 				const rebasedChangeset = fieldKind.changeHandler.rebaser.rebase(
-					fieldChangeset,
+					tagChange(fieldChangeset, changeTagged.revision),
 					tagChange(baseChangeset, over.revision),
 					(child, baseChild) => {
 						assert(
@@ -610,7 +611,7 @@ export class ModularChangeFamily
 							0x5b6 /* This field should not have any base changes */,
 						);
 						return this.rebaseNodeChange(
-							child,
+							tagChange(child, changeTagged.revision),
 							tagChange(undefined, over.revision),
 							genId,
 							crossFieldTable,
@@ -625,7 +626,7 @@ export class ModularChangeFamily
 					manager,
 					revisionMetadata,
 					existenceState,
-				);
+				).change;
 				const rebasedFieldChange: FieldChange = {
 					fieldKind: fieldKind.identifier,
 					change: brand(rebasedChangeset),
@@ -639,7 +640,7 @@ export class ModularChangeFamily
 	}
 
 	private rebaseNodeChange(
-		change: NodeChangeset | undefined,
+		changeTagged: TaggedChange<NodeChangeset | undefined>,
 		over: TaggedChange<NodeChangeset | undefined>,
 		genId: IdAllocator,
 		crossFieldTable: RebaseTable,
@@ -650,6 +651,7 @@ export class ModularChangeFamily
 		existenceState: NodeExistenceState = NodeExistenceState.Alive,
 		amend: boolean = false,
 	): NodeChangeset | undefined {
+		const { change } = changeTagged;
 		if (change === undefined && over.change?.fieldChanges === undefined) {
 			return undefined;
 		}
@@ -667,7 +669,7 @@ export class ModularChangeFamily
 				: tagChange(new Map(), over.revision);
 
 		const fieldChanges = this.rebaseFieldMap(
-			change?.fieldChanges ?? new Map(),
+			tagChange(change?.fieldChanges ?? new Map(), changeTagged.revision),
 			baseMap,
 			genId,
 			crossFieldTable,

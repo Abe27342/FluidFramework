@@ -109,14 +109,14 @@ const childRebaser = (
 	const valueChangeA = valueChangeFromNodeChange(nodeChangeA);
 	const valueChangeB = valueChangeFromNodeChange(nodeChangeB);
 	const rebased = valueHandler.rebaser.rebase(
-		valueChangeA,
+		makeAnonChange(valueChangeA),
 		makeAnonChange(valueChangeB),
 		unexpectedDelegate,
 		idAllocator,
 		crossFieldManager,
 		revisionMetadata,
 	);
-	return nodeChangeFromValueChange(rebased);
+	return nodeChangeFromValueChange(rebased.change);
 };
 
 const childToDelta = (nodeChange: NodeChangeset): Delta.Modify => {
@@ -279,7 +279,7 @@ describe("Generic FieldKind", () => {
 				},
 			];
 			const actual = genericFieldKind.changeHandler.rebaser.rebase(
-				changeA,
+				makeAnonChange(changeA),
 				makeAnonChange(changeB),
 				childRebaser,
 				idAllocator,
@@ -321,7 +321,7 @@ describe("Generic FieldKind", () => {
 				},
 			];
 			const actual = genericFieldKind.changeHandler.rebaser.rebase(
-				changeA,
+				makeAnonChange(changeA),
 				makeAnonChange(changeB),
 				childRebaser,
 				idAllocator,

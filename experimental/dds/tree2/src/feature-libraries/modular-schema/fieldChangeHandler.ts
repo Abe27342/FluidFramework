@@ -95,7 +95,7 @@ export interface FieldChangeRebaser<TChangeset> {
 	 * See `ChangeRebaser` for details.
 	 */
 	rebase(
-		change: TChangeset,
+		change: TaggedChange<TChangeset>,
 		over: TaggedChange<TChangeset>,
 		rebaseChild: NodeChangeRebaser,
 		genId: IdAllocator,
@@ -105,19 +105,21 @@ export interface FieldChangeRebaser<TChangeset> {
 		// default: false.
 		// When true, `change` should be interpreted as occurring before `over`
 		postbase?: boolean,
-	): TChangeset;
+		// TODO: Policy here, maybe makes more sense to have this just be TChangeset and make usages re-tag with same rev
+	): TaggedChange<TChangeset>;
 
 	/**
 	 * Amend `rebasedChange` with respect to new data in `crossFieldManager`.
 	 */
 	amendRebase(
-		rebasedChange: TChangeset,
+		rebasedChange: TaggedChange<TChangeset>,
 		over: TaggedChange<TChangeset>,
 		rebaseChild: NodeChangeRebaser,
 		genId: IdAllocator,
 		crossFieldManager: CrossFieldManager,
 		revisionMetadata: RevisionMetadataSource,
-	): TChangeset;
+		postbase?: boolean,
+	): TaggedChange<TChangeset>;
 }
 
 /**
@@ -132,7 +134,10 @@ export function referenceFreeFieldChangeRebaser<TChangeset>(data: {
 	return isolatedFieldChangeRebaser({
 		compose: (changes, _composeChild, _genId) => data.compose(changes.map((c) => c.change)),
 		invert: (change, _invertChild, reviver, _genId) => data.invert(change.change, reviver),
-		rebase: (change, over, _rebaseChild, _genId) => data.rebase(change, over.change),
+		rebase: (change, over, _rebaseChild, _genId) => ({
+			...change,
+			change: data.rebase(change.change, over.change),
+		}),
 	});
 }
 

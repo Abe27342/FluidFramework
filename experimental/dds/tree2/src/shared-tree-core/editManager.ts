@@ -544,7 +544,7 @@ export class EditManager<
 			// Otherwise, rebase the change over the trunk and append it, and append the original change to the peer branch.
 			const newChangeFullyRebased = rebaseChange(
 				this.changeFamily.rebaser,
-				newCommit.change,
+				newCommit,
 				peerLocalBranch.getHead(),
 				this.trunk.getHead(),
 			);
@@ -552,7 +552,7 @@ export class EditManager<
 			peerLocalBranch.apply(newCommit.change, newCommit.revision);
 			this.pushToTrunk(sequenceId, {
 				...newCommit,
-				change: newChangeFullyRebased,
+				change: newChangeFullyRebased.change,
 			});
 		}
 

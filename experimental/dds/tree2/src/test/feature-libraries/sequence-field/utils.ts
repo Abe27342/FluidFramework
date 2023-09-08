@@ -84,13 +84,17 @@ function composeI<T>(
 	return composed;
 }
 
-export function rebase(change: TestChangeset, base: TaggedChange<TestChangeset>): TestChangeset {
+export function rebase(
+	changeUntagged: TestChangeset,
+	base: TaggedChange<TestChangeset>,
+): TestChangeset {
+	const change = makeAnonChange(changeUntagged);
 	deepFreeze(change);
 	deepFreeze(base);
 
 	const metadata = defaultRevisionMetadataFromChanges([base, makeAnonChange(change)]);
 	const moveEffects = SF.newCrossFieldTable();
-	const idAllocator = idAllocatorFromMaxId(getMaxId(change, base.change));
+	const idAllocator = idAllocatorFromMaxId(getMaxId(changeUntagged, base.change));
 	let rebasedChange = SF.rebase(
 		change,
 		base,
@@ -111,7 +115,7 @@ export function rebase(change: TestChangeset, base: TaggedChange<TestChangeset>)
 		);
 		assert(!moveEffects.isInvalidated, "Rebase should not need more than one amend pass");
 	}
-	return rebasedChange;
+	return rebasedChange.change;
 }
 
 export function rebaseTagged(

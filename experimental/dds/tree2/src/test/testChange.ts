@@ -238,8 +238,11 @@ export class TestChangeRebaser implements ChangeRebaser<TestChange> {
 		return invert(change.change);
 	}
 
-	public rebase(change: TestChange, over: TaggedChange<TestChange>): TestChange {
-		return rebase(change, over.change) ?? { intentions: [] };
+	public rebase(
+		change: TaggedChange<TestChange>,
+		over: TaggedChange<TestChange>,
+	): TaggedChange<TestChange> {
+		return { ...change, change: rebase(change.change, over.change) ?? { intentions: [] } };
 	}
 
 	public rebaseAnchors(anchors: AnchorSet, over: TestChange): void {
@@ -248,7 +251,10 @@ export class TestChangeRebaser implements ChangeRebaser<TestChange> {
 }
 
 export class UnrebasableTestChangeRebaser extends TestChangeRebaser {
-	public rebase(change: TestChange, over: TaggedChange<TestChange>): TestChange {
+	public rebase(
+		change: TaggedChange<TestChange>,
+		over: TaggedChange<TestChange>,
+	): TaggedChange<TestChange> {
 		assert.fail("Unexpected call to rebase");
 	}
 }
@@ -259,7 +265,10 @@ export class NoOpChangeRebaser extends TestChangeRebaser {
 	public composedCount = 0;
 	public rebaseAnchorCallsCount = 0;
 
-	public rebase(change: TestChange, over: TaggedChange<TestChange>): TestChange {
+	public rebase(
+		change: TaggedChange<TestChange>,
+		over: TaggedChange<TestChange>,
+	): TaggedChange<TestChange> {
 		this.rebasedCount += 1;
 		return change;
 	}
@@ -289,8 +298,11 @@ export class ConstrainedTestChangeRebaser extends TestChangeRebaser {
 		super();
 	}
 
-	public rebase(change: TestChange, over: TaggedChange<TestChange>): TestChange {
-		assert(this.constraint(change, over));
+	public rebase(
+		change: TaggedChange<TestChange>,
+		over: TaggedChange<TestChange>,
+	): TaggedChange<TestChange> {
+		assert(this.constraint(change.change, over));
 		return super.rebase(change, over);
 	}
 }

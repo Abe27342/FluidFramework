@@ -107,10 +107,11 @@ export const genericChangeHandler: FieldChangeHandler<GenericChangeset> = {
 };
 
 function rebaseGenericChange(
-	change: GenericChangeset,
+	changeTagged: TaggedChange<GenericChangeset>,
 	{ change: over }: TaggedChange<GenericChangeset>,
 	rebaseChild: NodeChangeRebaser,
-): GenericChangeset {
+): TaggedChange<GenericChangeset> {
+	const { change } = changeTagged;
 	const rebased: GenericChangeset = [];
 	let iChange = 0;
 	let iOver = 0;
@@ -147,7 +148,7 @@ function rebaseGenericChange(
 		}
 	}
 
-	return rebased;
+	return { ...changeTagged, change: rebased };
 }
 
 /**

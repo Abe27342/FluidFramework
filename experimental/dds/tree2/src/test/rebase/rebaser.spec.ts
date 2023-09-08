@@ -9,7 +9,7 @@ import { ChangeRebaser, RevisionTag } from "../../core";
 
 // Allow importing from these specific files which are being tested:
 /* eslint-disable-next-line import/no-internal-modules */
-import { GraphCommit, rebaseBranch } from "../../core/rebase";
+import { GraphCommit, TaggedChange, rebaseBranch } from "../../core/rebase";
 
 import { fail } from "../../util";
 import { MockRepairDataStoreProvider } from "../utils";
@@ -36,8 +36,8 @@ export class DummyChangeRebaser implements ChangeRebaser<typeof dummyChange> {
 		return {};
 	}
 
-	public rebase(): typeof dummyChange {
-		return {};
+	public rebase(change: TaggedChange<typeof dummyChange>): TaggedChange<typeof dummyChange> {
+		return { ...change, change: {} };
 	}
 
 	public rebaseAnchors(): void {}

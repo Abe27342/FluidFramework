@@ -136,8 +136,9 @@ export class UndoRedoManager<TChange, TEditor extends ChangeFamilyEditor> {
 			);
 			change = pathAfterUndoable.reduce(
 				(a, b) => this.changeFamily.rebaser.rebase(a, b),
-				change,
-			);
+				// TODO: Should maybe be using arbitrary revision here.
+				tagChange(change, commit.revision),
+			).change;
 		}
 
 		return change;

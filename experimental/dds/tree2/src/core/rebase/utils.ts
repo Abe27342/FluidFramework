@@ -262,6 +262,7 @@ Bk_A1 := rebase(Bk, pAk)
 	let rebasedSourcePath: GraphCommit<TChange>[] = [];
 	// Rebase over the target path one edit at a time.
 	for (const target of targetPath) {
+		// TODO: Should be targetRebasePath?
 		let postbasedEdit = target;
 		for (const sourceCommit of baseSourcePath) {
 			// TODO: confirm it's reasonable to transfer other fields of TaggedChanges to their rebased variants..
@@ -269,13 +270,13 @@ Bk_A1 := rebase(Bk, pAk)
 			// `target`.
 			const rebasedSource = {
 				...sourceCommit,
-				change: changeRebaser.rebase(sourceCommit.change, postbasedEdit),
+				change: changeRebaser.rebase(sourceCommit, postbasedEdit).change,
 			};
 			// To make the next rebase valid, we need to rebase over a change with the same intent as `target` but
 			// based on the current source commit.
 			postbasedEdit = {
 				...postbasedEdit,
-				change: changeRebaser.rebase(postbasedEdit.change, sourceCommit, true),
+				change: changeRebaser.rebase(postbasedEdit, sourceCommit, true).change,
 			};
 			rebasedSourcePath.push(rebasedSource);
 		}
@@ -342,10 +343,10 @@ Bk_A1 := rebase(Bk, pAk)
  */
 export function rebaseChange<TChange>(
 	changeRebaser: ChangeRebaser<TChange>,
-	change: TChange,
+	change: GraphCommit<TChange>,
 	sourceHead: GraphCommit<TChange>,
 	targetHead: GraphCommit<TChange>,
-): TChange {
+): TaggedChange<TChange> {
 	const sourcePath: GraphCommit<TChange>[] = [];
 	const targetPath: GraphCommit<TChange>[] = [];
 	assert(
@@ -353,12 +354,15 @@ export function rebaseChange<TChange>(
 		0x576 /* branch A and branch B must be related */,
 	);
 
-	const changeRebasedToRef = sourcePath.reduceRight(
-		(newChange, branchCommit) =>
-			changeRebaser.rebase(
+	// TODO: Typing here is ugly.
+	const changeRebasedToRef: TaggedChange<TChange> = sourcePath.reduceRight(
+		(newChange, branchCommit) => ({
+			...newChange,
+			change: changeRebaser.rebase(
 				newChange,
 				inverseFromCommit(changeRebaser, branchCommit, branchCommit.repairData, true),
-			),
+			).change,
+		}),
 		change,
 	);
 

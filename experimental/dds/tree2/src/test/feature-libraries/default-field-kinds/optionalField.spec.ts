@@ -238,14 +238,14 @@ describe("optionalField", () => {
 				) => assert.fail("Should not be called");
 				assert.deepEqual(
 					optionalChangeRebaser.rebase(
-						change2PreChange1.change,
+						change2PreChange1,
 						change1,
 						childRebaser,
 						failIdAllocator,
 						failCrossFieldManager,
 						defaultRevisionMetadataFromChanges([change1]),
 					),
-					change2.change,
+					change2,
 				);
 			});
 
@@ -268,13 +268,13 @@ describe("optionalField", () => {
 
 				assert.deepEqual(
 					optionalChangeRebaser.rebase(
-						changeToRebase,
+						makeAnonChange(changeToRebase),
 						makeAnonChange(baseChange),
 						childRebaser,
 						failIdAllocator,
 						failCrossFieldManager,
 						defaultRevisionMetadataFromChanges([]),
-					),
+					).change,
 					expected,
 				);
 			});
@@ -282,6 +282,7 @@ describe("optionalField", () => {
 			it("can rebase a child change over a delete and revive of target node", () => {
 				const tag1 = mintRevisionTag();
 				const tag2 = mintRevisionTag();
+				const tag3 = mintRevisionTag();
 				const changeToRebase = optionalFieldEditor.buildChildChange(0, nodeChange1);
 				const deletion = tagChange(
 					optionalFieldEditor.set(undefined, false, brand(1)),
@@ -309,7 +310,7 @@ describe("optionalField", () => {
 				};
 
 				const changeToRebase2 = optionalChangeRebaser.rebase(
-					changeToRebase,
+					tagChange(changeToRebase, tag3),
 					deletion,
 					childRebaser,
 					failIdAllocator,

@@ -71,28 +71,31 @@ import { EmptyInputCellMark } from "./helperTypes";
  * - Support for slices is not implemented.
  */
 export function rebase<TNodeChange>(
-	change: Changeset<TNodeChange>,
+	changeTagged: TaggedChange<Changeset<TNodeChange>>,
 	base: TaggedChange<Changeset<TNodeChange>>,
 	rebaseChild: NodeChangeRebaser<TNodeChange>,
 	genId: IdAllocator,
 	manager: CrossFieldManager,
 	revisionMetadata: RevisionMetadataSource,
 	nodeExistenceState: NodeExistenceState = NodeExistenceState.Alive,
-): Changeset<TNodeChange> {
+): TaggedChange<Changeset<TNodeChange>> {
 	assert(base.revision !== undefined, 0x69b /* Cannot rebase over changeset with no revision */);
 	const baseInfo =
 		base.revision === undefined ? undefined : revisionMetadata.getInfo(base.revision);
 	const baseIntention = baseInfo?.rollbackOf ?? base.revision;
-	return rebaseMarkList(
-		change,
-		base.change,
-		base.revision,
-		baseIntention,
-		rebaseChild,
-		genId,
-		manager as MoveEffectTable<TNodeChange>,
-		nodeExistenceState,
-	);
+	return {
+		...changeTagged,
+		change: rebaseMarkList(
+			changeTagged.change,
+			base.change,
+			base.revision,
+			baseIntention,
+			rebaseChild,
+			genId,
+			manager as MoveEffectTable<TNodeChange>,
+			nodeExistenceState,
+		),
+	};
 }
 
 export type NodeChangeRebaser<TNodeChange> = (
@@ -565,21 +568,24 @@ function withoutCellId<T, TMark extends Mark<T>>(mark: TMark): TMark {
 }
 
 export function amendRebase<TNodeChange>(
-	rebasedMarks: MarkList<TNodeChange>,
+	rebasedMarks: TaggedChange<MarkList<TNodeChange>>,
 	baseMarks: TaggedChange<MarkList<TNodeChange>>,
 	rebaseChild: NodeChangeRebaser<TNodeChange>,
 	genId: IdAllocator,
 	crossFieldManager: CrossFieldManager,
 	revisionMetadata: RevisionMetadataSource,
-): Changeset<TNodeChange> {
-	return amendRebaseI(
-		baseMarks.revision,
-		baseMarks.change,
-		rebasedMarks,
-		rebaseChild,
-		crossFieldManager as MoveEffectTable<TNodeChange>,
-		revisionMetadata,
-	);
+): TaggedChange<Changeset<TNodeChange>> {
+	return {
+		...rebasedMarks,
+		change: amendRebaseI(
+			baseMarks.revision,
+			baseMarks.change,
+			rebasedMarks.change,
+			rebaseChild,
+			crossFieldManager as MoveEffectTable<TNodeChange>,
+			revisionMetadata,
+		),
+	};
 }
 
 function amendRebaseI<TNodeChange>(

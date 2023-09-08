@@ -191,14 +191,14 @@ describe("defaultFieldKinds", () => {
 
 			assert.deepEqual(
 				fieldHandler.rebaser.rebase(
-					change2.change,
+					change2,
 					makeAnonChange(change1WithChildChange),
 					childRebaser,
 					failIdAllocator,
 					failCrossFieldManager,
 					defaultRevisionMetadataFromChanges([]),
 				),
-				change2.change,
+				change2,
 			);
 		});
 
@@ -217,13 +217,13 @@ describe("defaultFieldKinds", () => {
 
 			assert.deepEqual(
 				fieldHandler.rebaser.rebase(
-					changeToRebase,
+					makeAnonChange(changeToRebase),
 					makeAnonChange(baseChange),
 					childRebaser,
 					failIdAllocator,
 					failCrossFieldManager,
 					defaultRevisionMetadataFromChanges([]),
-				),
+				).change,
 				childChange3,
 			);
 		});

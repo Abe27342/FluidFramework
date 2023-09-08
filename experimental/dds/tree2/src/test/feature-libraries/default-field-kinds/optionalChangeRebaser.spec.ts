@@ -107,7 +107,7 @@ function rebase(
 	const moveEffects = failCrossFieldManager;
 	const idAllocator = idAllocatorFromMaxId(getMaxId(change, base.change));
 	return optionalChangeRebaser.rebase(
-		change,
+		tagChange(change, mintRevisionTag()),
 		base,
 		TestChange.rebase as any,
 		idAllocator,
@@ -115,7 +115,7 @@ function rebase(
 		metadata,
 		undefined,
 		postbase,
-	);
+	).change;
 }
 
 function rebaseTagged(

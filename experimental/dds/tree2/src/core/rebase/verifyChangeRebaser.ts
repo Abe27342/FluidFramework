@@ -102,7 +102,8 @@ export function verifyChangeRebaser<TChange>(
 	changes: ReadonlySet<TChange>,
 	isEquivalent: (a: TChange, b: TChange) => boolean,
 ): OutputType<TChange> {
-	const rebase = (change: TChange, over: TChange) => rebaser.rebase(change, makeAnonChange(over));
+	const rebase = (change: TChange, over: TChange) =>
+		rebaser.rebase(makeAnonChange(change), makeAnonChange(over)).change;
 	const compose = (changeToCompose: TChange[]) =>
 		rebaser.compose(changeToCompose.map(makeAnonChange));
 	// TODO: test with isRollback = true

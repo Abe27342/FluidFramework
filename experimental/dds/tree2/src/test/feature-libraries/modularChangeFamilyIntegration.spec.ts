@@ -63,7 +63,10 @@ describe("ModularChangeFamily integration", () => {
 			editor.sequenceField({ parent: undefined, field: fieldA }).delete(1, 1);
 			editor.sequenceField({ parent: undefined, field: fieldB }).delete(2, 1);
 			const [move, remove, expected] = getChanges();
-			const rebased = family.rebase(remove, tagChange(move, mintRevisionTag()));
+			const rebased = family.rebase(
+				tagChange(remove, mintRevisionTag()),
+				tagChange(move, mintRevisionTag()),
+			).change;
 			const rebasedDelta = normalizeDelta(family.intoDelta(rebased));
 			const expectedDelta = normalizeDelta(family.intoDelta(expected));
 			assert.deepEqual(rebasedDelta, expectedDelta);
@@ -88,7 +91,10 @@ describe("ModularChangeFamily integration", () => {
 				2,
 			);
 			const [remove, move, expected] = getChanges();
-			const rebased = family.rebase(move, tagChange(remove, mintRevisionTag()));
+			const rebased = family.rebase(
+				tagChange(move, mintRevisionTag()),
+				tagChange(remove, mintRevisionTag()),
+			).change;
 			const rebasedDelta = normalizeDelta(family.intoDelta(rebased));
 			const expectedDelta = normalizeDelta(family.intoDelta(expected));
 			assert.deepEqual(rebasedDelta, expectedDelta);

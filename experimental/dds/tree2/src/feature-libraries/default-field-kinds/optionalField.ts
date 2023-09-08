@@ -240,7 +240,7 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 	// last-write wins
 	rebase: (
 		// TODO: Tagging here isn't doable when postbase is true.
-		change: OptionalChangeset,
+		changeTagged: TaggedChange<OptionalChangeset>,
 		overTagged: TaggedChange<OptionalChangeset>,
 		rebaseChild: NodeChangeRebaser,
 		genId: IdAllocator,
@@ -248,7 +248,8 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 		revisionMetadata: RevisionMetadataSource,
 		existenceState?: NodeExistenceState,
 		postbase: boolean = false,
-	): OptionalChangeset => {
+	): TaggedChange<OptionalChangeset> => {
+		const change = changeTagged.change;
 		const over = overTagged.change;
 
 		// TODO: Similar to invert, when `change` doesn't have a fieldChange with set, we need to detect
@@ -387,15 +388,16 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 			rebased.childChanges = Array.from(perChildChanges.entries());
 		}
 
-		return rebased;
+		return { ...changeTagged, change: rebased };
 	},
 
 	amendRebase: (
-		change: OptionalChangeset,
+		changeTagged: TaggedChange<OptionalChangeset>,
 		overTagged: TaggedChange<OptionalChangeset>,
 		rebaseChild: NodeChangeRebaser,
 		// TODO: should probably have postbase here too
 	) => {
+		const { change } = changeTagged;
 		const amended = { ...change };
 		if (change.childChanges !== undefined) {
 			const overChildChanges = new ChildChangeMap<NodeChangeset>();
@@ -416,7 +418,7 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 
 			amended.childChanges = childChanges;
 		}
-		return amended;
+		return { ...changeTagged, change: amended };
 	},
 };
 

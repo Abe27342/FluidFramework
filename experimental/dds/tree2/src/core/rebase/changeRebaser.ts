@@ -87,7 +87,11 @@ export interface ChangeRebaser<TChangeset> {
 	 * inherent asymmetry in terms of which change occurred 'first' (first-write-wins, last-write-wins) and
 	 * thus need to know which change is actually intended to happen 'first'.
 	 */
-	rebase(change: TChangeset, over: TaggedChange<TChangeset>, postbase?: boolean): TChangeset;
+	rebase(
+		change: TaggedChange<TChangeset>,
+		over: TaggedChange<TChangeset>,
+		postbase?: boolean,
+	): TaggedChange<TChangeset>;
 
 	// TODO: we are forcing a single AnchorSet implementation, but also making ChangeRebaser deal depend on/use it.
 	// This isn't ideal, but it might be fine?
