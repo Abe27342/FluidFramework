@@ -232,57 +232,15 @@ export function rebaseBranch<TChange>(
 		];
 	}
 
-	// TOOD: Repair data, handling case where element of targetPath is present in sourcePath
-	let baseSourcePath: TChange[] = sourcePath.map((commit) => commit.change);
-	// TODO: Work out how change tagging works.
-	// TODO: Construct proper graph commits out of this.
-	let rebasedSourcePath: TChange[] = [];
-	// Rebase over the target path one edit at a time.
-	for (const target of targetPath) {
-		let postbasedEdit = target;
-		for (const sourceCommit of baseSourcePath) {
-			// Need to push a commit with the same intent as `sourceCommit` but accounting for changes due to
-			// `target`.
-			const rebasedSource = changeRebaser.rebase(sourceCommit, postbasedEdit);
-			// To make the next rebase valid, we need to rebase over a change with the same intent as `target` but
-			// based on the current source commit.
-			postBasedEdit = changeRebaser.rebase(postbasedEdit, sourceCommit, true);
-			rebasedSourcePath.push(rebasedSource);
-		}
-
-		baseSourcePath = rebasedSourcePath;
-		rebasedSourcePath = [];
-	}
-
-	let newHead = newBase;
-	const inverses: TaggedChange<TChange>[] = [];
-	if (sourcePath.length !== 0) {
-		// Clone the original repair data store provider so that it can be modified without affecting the original.
-		const repairDataStoreProviderClone = sourceRepairDataStoreProvider?.clone();
-		const nonTaggedInverses: TChange[] = [];
-		// Revert changes from the source path to get to the new base
-		for (let i = sourcePath.length - 1; i >= 0; i--) {
-			const c = sourcePath[i];
-			const inverse = changeRebaser.invert(c, true, c.repairData);
-			nonTaggedInverses.push(inverse);
-			repairDataStoreProviderClone?.applyChange(inverse);
-		}
-
-		if (repairDataStoreProviderClone !== undefined) {
-			// Apply the changes in the target rebase path
-			for (const c of targetRebasePath) {
-				repairDataStoreProviderClone.applyChange(c.change);
-			}
-		}
-
-		/**
- * Maybe better goal is to say:
+	/**
+ * Idea here: say that targetBranch has a single extra commit, and sourceBranch has `m` commits. So we have:
 
 A0----A1
 |
 |----B1----B2----...----Bm
 
-and aim to merge B into A. If we repeat that process n-1 more times, we can do the original scenario correctly.
+and aim to rebase B onto A1. If we repeat that process n-1 more times, we can do the original scenario correctly,
+i.e. when the targetBranch has more than one commit.
 
 B1_A1 = rebase(B1, A1)
 B2_A1 = rebase(B2, postbase(A1, B1))
@@ -296,42 +254,73 @@ Bk_A1 := rebase(Bk, pAk)
 
  */
 
-		// TODO: Update
-		// For each source commit, rebase backwards over the inverses of any commits already rebased, and then
-		// rebase forwards over the rest of the commits up to the new base before advancing the new base.
-		for (const c of sourcePath) {
-			if (sourceSet.has(c.revision)) {
-				const change = rebaseChangeOverChanges(changeRebaser, c.change, [
-					...inverses,
-					...targetRebasePath,
-				]);
-				const repairData = repairDataStoreProviderClone?.createRepairData();
-				repairData?.capture(change, c.revision);
-				newHead = {
-					revision: c.revision,
-					change,
-					parent: newHead,
-					repairData,
-				};
-				sourceCommits.push(newHead);
-				targetRebasePath.push({ ...c, change });
-				repairDataStoreProviderClone?.applyChange(change);
-			}
+	// TODO: Put a sourcePath.length !== 0 clause around basically all of this
 
-			inverses.unshift(
-				tagRollbackInverse(
-					nonTaggedInverses.pop() ??
-						fail("The commits in source path should not be modified."),
-					mintRevisionTag(),
-					c.revision,
-				),
-			);
+	// TOOD: handling case where element of targetPath is present in sourcePath
+	let baseSourcePath: GraphCommit<TChange>[] = sourcePath;
+	// TODO: Work out how change tagging works.
+	let rebasedSourcePath: GraphCommit<TChange>[] = [];
+	// Rebase over the target path one edit at a time.
+	for (const target of targetPath) {
+		let postbasedEdit = target;
+		for (const sourceCommit of baseSourcePath) {
+			// TODO: confirm it's reasonable to transfer other fields of TaggedChanges to their rebased variants..
+			// Need to push a commit with the same intent as `sourceCommit` but accounting for changes due to
+			// `target`.
+			const rebasedSource = {
+				...sourceCommit,
+				change: changeRebaser.rebase(sourceCommit.change, postbasedEdit),
+			};
+			// To make the next rebase valid, we need to rebase over a change with the same intent as `target` but
+			// based on the current source commit.
+			postbasedEdit = {
+				...postbasedEdit,
+				change: changeRebaser.rebase(postbasedEdit.change, sourceCommit, true),
+			};
+			rebasedSourcePath.push(rebasedSource);
 		}
+
+		baseSourcePath = rebasedSourcePath;
+		rebasedSourcePath = [];
+	}
+
+	// TODO: Computing the net change is currently done with inverse, but might be better to do with postbase.
+	// Unclear if there are semantic differences, but this approach seems to fit better with repair data.
+	// Clone the original repair data store provider so that it can be modified without affecting the original.
+	const repairDataStoreProviderClone = sourceRepairDataStoreProvider?.clone();
+	const inverses: TaggedChange<TChange>[] = [];
+	// Revert changes from the source path to get to the new base
+	for (let i = sourcePath.length - 1; i >= 0; i--) {
+		const c = sourcePath[i];
+		const inverseChange = changeRebaser.invert(c, true, c.repairData);
+		inverses.push(tagRollbackInverse(inverseChange, mintRevisionTag(), c.revision));
+		repairDataStoreProviderClone?.applyChange(inverseChange);
+	}
+
+	let newHead = newBase;
+	if (repairDataStoreProviderClone !== undefined) {
+		// Apply the changes in the target rebase path
+		for (const c of targetRebasePath) {
+			repairDataStoreProviderClone.applyChange(c.change);
+		}
+	}
+
+	for (const taggedChange of baseSourcePath) {
+		const { revision, change } = taggedChange;
+		const repairData = repairDataStoreProviderClone?.createRepairData();
+		repairData?.capture(change, revision);
+		newHead = {
+			revision,
+			change,
+			parent: newHead,
+			repairData,
+		};
+		repairDataStoreProviderClone?.applyChange(change);
 	}
 
 	return [
 		newHead,
-		changeRebaser.compose([...inverses, ...targetRebasePath]),
+		changeRebaser.compose([...inverses, ...targetRebasePath, ...baseSourcePath]),
 		{
 			deletedSourceCommits,
 			targetCommits,
@@ -340,7 +329,7 @@ Bk_A1 := rebase(Bk, pAk)
 	];
 }
 
-// TODO: update
+// TODO: consider updating to use postbase as well.
 /**
  * "Sandwich/Horseshoe Rebase" a change over the given source and target branches
  * @param changeRebaser - the change rebaser responsible for rebasing the change over the commits in each branch
@@ -374,14 +363,6 @@ export function rebaseChange<TChange>(
 	);
 
 	return targetPath.reduce((a, b) => changeRebaser.rebase(a, b), changeRebasedToRef);
-}
-
-function rebaseChangeOverChanges<TChange>(
-	changeRebaser: ChangeRebaser<TChange>,
-	changeToRebase: TChange,
-	changesToRebaseOver: TaggedChange<TChange>[],
-) {
-	return changesToRebaseOver.reduce((a, b) => changeRebaser.rebase(a, b), changeToRebase);
 }
 
 function inverseFromCommit<TChange>(
