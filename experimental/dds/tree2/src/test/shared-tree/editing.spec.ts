@@ -12,7 +12,7 @@ import { makeTreeFromJson, remove, insert, expectJsonTree } from "../utils";
 import { ISharedTreeView } from "../../shared-tree";
 import { singleTextCursor } from "../../feature-libraries";
 
-describe.only("Editing", () => {
+describe("Editing", () => {
 	describe.skip("Sequence Field", () => {
 		it("can order concurrent inserts within concurrently deleted content", () => {
 			const tree = makeTreeFromJson(["A", "B", "C", "D"]);

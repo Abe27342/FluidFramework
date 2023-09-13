@@ -316,6 +316,8 @@ Bk_A1 := rebase(Bk, pAk)
 			parent: newHead,
 			repairData,
 		};
+		// TODO: make deletedSourceCommits / targetCommits make sense too
+		sourceCommits.push(newHead);
 		repairDataStoreProviderClone?.applyChange(change);
 	}
 

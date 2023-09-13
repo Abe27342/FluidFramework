@@ -432,6 +432,7 @@ export class ModularChangeFamily
 	public rebase(
 		changeTagged: TaggedChange<ModularChangeset>,
 		over: TaggedChange<ModularChangeset>,
+		postbase: boolean = false,
 	): TaggedChange<ModularChangeset> {
 		const change = changeTagged.change;
 		const maxId = Math.max(change.maxId ?? -1, over.change.maxId ?? -1);
@@ -458,6 +459,9 @@ export class ModularChangeFamily
 			() => true,
 			revisionMetadata,
 			constraintState,
+			false,
+			NodeExistenceState.Alive,
+			postbase,
 		);
 
 		const rebasedChangeset = makeModularChangeset(
@@ -480,6 +484,8 @@ export class ModularChangeFamily
 			revisionMetadata,
 			constraintState,
 			true,
+			NodeExistenceState.Alive,
+			postbase,
 		);
 
 		// assert(
@@ -512,6 +518,7 @@ export class ModularChangeFamily
 		constraintState: ConstraintState,
 		amend: boolean = false,
 		existenceState: NodeExistenceState = NodeExistenceState.Alive,
+		postbase: boolean = false,
 	): FieldChangeMap {
 		const { change } = changeTagged;
 		const rebasedFields: FieldChangeMap = new Map();
@@ -551,6 +558,7 @@ export class ModularChangeFamily
 					constraintState,
 					stateChange,
 					amend,
+					postbase,
 				);
 
 			const rebasedField = !amend
@@ -561,6 +569,8 @@ export class ModularChangeFamily
 						genId,
 						manager,
 						revisionMetadata,
+						NodeExistenceState.Alive,
+						postbase,
 				  ).change
 				: fieldKind.changeHandler.rebaser.amendRebase(
 						tagChange(fieldChangeset, changeTagged.revision),
@@ -569,6 +579,7 @@ export class ModularChangeFamily
 						genId,
 						manager,
 						revisionMetadata,
+						postbase,
 				  ).change;
 
 			if (!fieldKind.changeHandler.isEmpty(rebasedField)) {
@@ -620,6 +631,8 @@ export class ModularChangeFamily
 							revisionMetadata,
 							constraintState,
 							existenceState,
+							false,
+							postbase,
 						);
 					},
 					genId,
@@ -650,6 +663,7 @@ export class ModularChangeFamily
 		constraintState: ConstraintState,
 		existenceState: NodeExistenceState = NodeExistenceState.Alive,
 		amend: boolean = false,
+		postbase: boolean = false,
 	): NodeChangeset | undefined {
 		const { change } = changeTagged;
 		if (change === undefined && over.change?.fieldChanges === undefined) {
@@ -678,6 +692,7 @@ export class ModularChangeFamily
 			constraintState,
 			amend,
 			existenceState,
+			postbase,
 		);
 
 		const rebasedChange: NodeChangeset = {};

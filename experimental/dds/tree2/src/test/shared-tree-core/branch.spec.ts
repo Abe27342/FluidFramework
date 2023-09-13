@@ -29,7 +29,7 @@ const defaultChangeFamily = new DefaultChangeFamily({ jsonValidator: noopValidat
 
 type DefaultBranch = SharedTreeBranch<DefaultEditBuilder, DefaultChangeset>;
 
-describe("Branches", () => {
+describe.only("Branches", () => {
 	/** The tag used for the "origin commit" (the commit that all other commits share as a common ancestor) */
 	const nullRevisionTag = assertIsRevisionTag("00000000-0000-4000-8000-000000000000");
 
