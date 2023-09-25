@@ -3,7 +3,7 @@
  * Licensed under the MIT License.
  */
 
-import { assert } from "@fluidframework/common-utils";
+import { assert } from "@fluidframework/core-utils";
 import {
 	Delta,
 	ITreeCursor,
@@ -12,8 +12,9 @@ import {
 	tagChange,
 	ChangesetLocalId,
 	ChangeAtomId,
+	RevisionTag,
 } from "../../core";
-import { fail, Mutable } from "../../util";
+import { fail, Mutable, IdAllocator, SizedNestedMap } from "../../util";
 import { singleTextCursor, jsonableTreeFromCursor } from "../treeTextCursor";
 import {
 	ToDelta,
@@ -24,7 +25,6 @@ import {
 	NodeChangeset,
 	FieldEditor,
 	NodeReviver,
-	IdAllocator,
 	CrossFieldManager,
 	RevisionMetadataSource,
 	getIntention,
@@ -47,32 +47,71 @@ interface IChildChangeMap<T> {
 	readonly size: number;
 }
 
-// TODO: better implementation which doesn't use JSON.stringify (double-nested map should be fine, maybe something else is conceptually nicer)
 class ChildChangeMap<T> implements IChildChangeMap<T> {
-	private readonly data = new Map<string, T>();
-	set(id: ChangeId, childChange: T): void {
-		this.data.set(JSON.stringify(id), childChange);
+	private readonly nestedMapData = new SizedNestedMap<
+		ChangesetLocalId | "self",
+		RevisionTag | undefined,
+		T
+	>();
+	public set(id: ChangeId, childChange: T): void {
+		if (id === "self") {
+			this.nestedMapData.set("self", undefined, childChange);
+		} else {
+			this.nestedMapData.set(id.localId, id.revision, childChange);
+		}
 	}
 
-	get(id: ChangeId): T | undefined {
-		return this.data.get(JSON.stringify(id));
+	public get(id: ChangeId): T | undefined {
+		return id === "self"
+			? this.nestedMapData.tryGet(id, undefined)
+			: this.nestedMapData.tryGet(id.localId, id.revision);
 	}
 
-	delete(id: ChangeId): boolean {
-		return this.data.delete(JSON.stringify(id));
+	public delete(id: ChangeId): boolean {
+		return id === "self"
+			? this.nestedMapData.delete("self", undefined)
+			: this.nestedMapData.delete(id.localId, id.revision);
 	}
 
-	keys(): Iterable<ChangeId> {
-		return Array.from(this.data.keys(), (v) => JSON.parse(v));
+	public keys(): Iterable<ChangeId> {
+		const changeIds: ChangeId[] = [];
+		for (const [localId, nestedMap] of this.nestedMapData) {
+			if (localId === "self") {
+				changeIds.push("self");
+			} else {
+				for (const [revisionTag, _] of nestedMap) {
+					changeIds.push(
+						revisionTag === undefined
+							? { localId }
+							: { localId, revision: revisionTag },
+					);
+				}
+			}
+		}
+
+		return changeIds;
 	}
-	values(): Iterable<T> {
-		return this.data.values();
+	public values(): Iterable<T> {
+		return this.nestedMapData.values();
 	}
-	entries(): Iterable<[ChangeId, T]> {
-		return Array.from(this.data.entries(), ([k, v]) => [JSON.parse(k), v]);
+	public entries(): Iterable<[ChangeId, T]> {
+		const entries: [ChangeId, T][] = [];
+		for (const changeId of this.keys()) {
+			if (changeId === "self") {
+				const entry = this.nestedMapData.tryGet("self", undefined);
+				assert(entry !== undefined, "Entry should not be undefined when iterating keys.");
+				entries.push(["self", entry]);
+			} else {
+				const entry = this.nestedMapData.tryGet(changeId.localId, changeId.revision);
+				assert(entry !== undefined, "Entry should not be undefined when iterating keys.");
+				entries.push([changeId, entry]);
+			}
+		}
+
+		return entries;
 	}
-	get size(): number {
-		return this.data.size;
+	public get size(): number {
+		return this.nestedMapData.size;
 	}
 }
 
@@ -82,12 +121,12 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 		composeChild: NodeChangeComposer,
 	): OptionalChangeset => {
 		const perChildChanges = new ChildChangeMap<TaggedChange<NodeChangeset>[]>();
-		const addChildChange = (id: ChangeId, ...changes: TaggedChange<NodeChangeset>[]) => {
+		const addChildChange = (id: ChangeId, ...changeList: TaggedChange<NodeChangeset>[]) => {
 			const existingChanges = perChildChanges.get(id);
 			if (existingChanges !== undefined) {
-				existingChanges.push(...changes);
+				existingChanges.push(...changeList);
 			} else {
-				perChildChanges.set(id, [...changes]);
+				perChildChanges.set(id, [...changeList]);
 			}
 		};
 
@@ -101,8 +140,7 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 					if (childId === "self") {
 						// childChange refers to the node that existed at the start of `change`,
 						// Thus in the composition, it should be referred to by whatever deletes that node in the future, which is what
-						// currentChildNodeChanges tracks (note that since we handle childChanges before fieldChange, this applies to
-						// if the current change does delete that node).
+						// currentChildNodeChanges tracks
 						currentChildNodeChanges.push(taggedChildChange);
 					} else {
 						addChildChange(childId, taggedChildChange);
@@ -151,10 +189,7 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 					fieldChange.newContent !== undefined,
 					"after node must be defined to receive changes",
 				);
-				fieldChange.newContent.changes =
-					currentChildNodeChanges.length === 1
-						? currentChildNodeChanges[0].change
-						: composeChild(currentChildNodeChanges);
+				fieldChange.newContent.changes = composeChild(currentChildNodeChanges);
 			} else {
 				addChildChange("self", ...currentChildNodeChanges);
 			}
@@ -167,9 +202,9 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 		}
 
 		if (perChildChanges.size > 0) {
-			composed.childChanges = Array.from(perChildChanges.entries(), ([id, changes]) => [
+			composed.childChanges = Array.from(perChildChanges.entries(), ([id, changeList]) => [
 				id,
-				changes.length === 1 ? changes[0].change : composeChild(changes),
+				composeChild(changeList),
 			]);
 		}
 
@@ -184,7 +219,7 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 		reviver: NodeReviver,
 	): OptionalChangeset => {
 		// Changes to the child that existed in this field before `change` was applied.
-		let originalChildChanges: NodeChangeset | undefined = undefined;
+		let originalChildChanges: NodeChangeset | undefined;
 		const inverseChildChanges = new ChildChangeMap<NodeChangeset>();
 		if (change.childChanges !== undefined) {
 			for (const [id, childChange] of change.childChanges) {
@@ -192,9 +227,7 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 					originalChildChanges = invertChild(childChange, 0);
 				} else {
 					inverseChildChanges.set(
-						// TODO: It's a bit weird that we re-use the id here. It should conceivably be
-						// something like a rollback of that revision.
-						// Maybe we should operate solely in terms of ChangesetLocalId_s in the format? or something like that
+						// This makes assumptions about how sandwich rebasing works
 						id,
 						invertChild(childChange, 0),
 					);
@@ -262,9 +295,6 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 		}
 		const change = changeTagged.change;
 		const over = overTagged.change;
-
-		// TODO: Similar to invert, when `change` doesn't have a fieldChange with set, we need to detect
-		// when `over` has revived a node that has changes and move those changes to 'fieldChanges'
 		const perChildChanges = new ChildChangeMap<NodeChangeset>();
 		if (change.childChanges !== undefined) {
 			// TODO: (minor) early exits, better data structure choices, etc.
@@ -297,16 +327,9 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 			}
 
 			for (const [id, childChange] of change.childChanges) {
-				// TODO: NodeExistenceState needs to be double-checked for these cases.
-				// TODO: Consolidate these cases. Lots of duplication.
-				// Just a bit tricky to get right...
 				if (id === "self") {
 					const overChildChange = overChildChanges.get(id);
-					if (over.fieldChange !== undefined && change.fieldChange !== undefined) {
-						// `overChange` and `childChange` refer to conceptually different nodes: each replaced the field.
-						// No need to rebase.
-						perChildChanges.set(id, childChange);
-					} else if (over.fieldChange !== undefined && change.fieldChange === undefined) {
+					if (over.fieldChange !== undefined) {
 						// `childChange` refers to the node existing in this field before rebasing, but
 						// that node was removed by `over`.
 						const rebasedChild = rebaseChild(
@@ -334,8 +357,7 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 							);
 						}
 					} else {
-						// `over` didn't remove the node (its fieldChange is undefined), and so `overChildChange`
-						// refers to the same node
+						// `over` didn't remove the node (its fieldChange is undefined)
 						const rebasedChild = rebaseChild(
 							childChange,
 							overChildChange,
@@ -354,7 +376,6 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 					) {
 						// childChange refers to changes to node being revived by `over`.
 						const overChange = over.fieldChange?.newContent?.changes;
-						// TODO: confirm NodeExistenceState is reasonable
 						const rebasedChild = rebaseChild(
 							childChange,
 							overChange,
@@ -367,7 +388,6 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 						// childChange refers to changes to node removed by some past revision. Rebase over any changes that
 						// `over` has to that same revision.
 						const overChange = overChildChanges.get(id);
-						// TODO: confirm NodeExistenceState is reasonable
 						const rebasedChild = rebaseChild(
 							childChange,
 							overChange,
@@ -418,9 +438,6 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 
 			const childChanges: typeof change.childChanges = [];
 			for (const [id, childChange] of change.childChanges) {
-				// TODO: Maybe need an 'end' clause here.
-				// Prior impl is weird in that it doesn't seem to check that rebaseChild
-				// call is legit at all.
 				const rebasedChange = rebaseChild(childChange, overChildChanges.get(id));
 				if (rebasedChange !== undefined) {
 					childChanges.push([id, rebasedChange]);

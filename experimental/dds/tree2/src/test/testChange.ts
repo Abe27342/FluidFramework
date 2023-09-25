@@ -146,26 +146,6 @@ function rebase(
 	return TestChange.emptyChange;
 }
 
-function rebaseAnchors(anchors: AnchorSet, over: TestChange): void {
-	if (isNonEmptyChange(over) && anchors instanceof TestAnchorSet) {
-		let lastChange: RecursiveReadonly<NonEmptyTestChange> | undefined;
-		const { rebases } = anchors;
-		for (let iChange = rebases.length - 1; iChange >= 0; --iChange) {
-			const change = rebases[iChange];
-			if (isNonEmptyChange(change)) {
-				lastChange = change;
-				break;
-			}
-		}
-		if (lastChange !== undefined) {
-			// The new change should apply to the context brought about by the previous change
-			assert.deepEqual(over.inputContext, lastChange.outputContext);
-		}
-		anchors.intentions = composeIntentions(anchors.intentions, over.intentions);
-		rebases.push(over);
-	}
-}
-
 function checkChangeList(
 	changes: readonly RecursiveReadonly<TestChange>[],
 	intentions: number[],
@@ -226,7 +206,6 @@ export const TestChange = {
 	compose,
 	invert,
 	rebase,
-	rebaseAnchors,
 	checkChangeList,
 	toDelta,
 	codec,
@@ -252,10 +231,6 @@ export class TestChangeRebaser implements ChangeRebaser<TestChange> {
 			change: rebase(change.change, over.change, undefined, postbase) ?? { intentions: [] },
 		};
 	}
-
-	public rebaseAnchors(anchors: AnchorSet, over: TestChange): void {
-		rebaseAnchors(anchors, over);
-	}
 }
 
 export class UnrebasableTestChangeRebaser extends TestChangeRebaser {
@@ -271,7 +246,6 @@ export class NoOpChangeRebaser extends TestChangeRebaser {
 	public rebasedCount = 0;
 	public invertedCount = 0;
 	public composedCount = 0;
-	public rebaseAnchorCallsCount = 0;
 
 	public rebase(
 		change: TaggedChange<TestChange>,
@@ -289,10 +263,6 @@ export class NoOpChangeRebaser extends TestChangeRebaser {
 	public compose(changes: TaggedChange<TestChange>[]): TestChange {
 		this.composedCount += changes.length;
 		return changes.length === 0 ? emptyChange : changes[0].change;
-	}
-
-	public rebaseAnchors(anchors: AnchorSet, over: TestChange): void {
-		this.rebaseAnchorCallsCount += 1;
 	}
 }
 

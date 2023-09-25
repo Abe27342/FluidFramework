@@ -5,8 +5,8 @@
 
 import { makeRandom } from "@fluid-internal/stochastic-test-utils";
 import { unreachableCase } from "@fluidframework/common-utils";
-import { ChangeRebaser, makeAnonChange, tagChange } from "../../core";
 import { StableId } from "@fluidframework/runtime-definitions";
+import { ChangeRebaser, makeAnonChange, tagChange } from "../../core";
 
 enum Operation {
 	Rebase = 0,

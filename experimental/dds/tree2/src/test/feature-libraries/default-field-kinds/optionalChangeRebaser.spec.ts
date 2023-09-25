@@ -4,12 +4,7 @@
  */
 
 import { strict as assert } from "assert";
-import {
-	CrossFieldManager,
-	NodeChangeset,
-	idAllocatorFromMaxId,
-	singleTextCursor,
-} from "../../../feature-libraries";
+import { CrossFieldManager, NodeChangeset, singleTextCursor } from "../../../feature-libraries";
 import {
 	ChangesetLocalId,
 	Delta,
@@ -27,12 +22,14 @@ import {
 // Search this file for "as any" and "as NodeChangeset"
 import { TestChange } from "../../testChange";
 import { deepFreeze, defaultRevisionMetadataFromChanges, isDeltaVisible } from "../../utils";
-import { brand } from "../../../util";
+import { brand, idAllocatorFromMaxId } from "../../../util";
 import {
 	optionalChangeRebaser,
 	optionalFieldEditor,
 	optionalFieldIntoDelta,
+	// eslint-disable-next-line import/no-internal-modules
 } from "../../../feature-libraries/default-field-kinds/optionalField";
+// eslint-disable-next-line import/no-internal-modules
 import { OptionalChangeset } from "../../../feature-libraries/default-field-kinds/defaultFieldChangeTypes";
 
 const type: TreeSchemaIdentifier = brand("Node");
@@ -261,7 +258,8 @@ describe("OptionalField - Rebaser Axioms", () => {
 			if (["SetA", "SetB", "SetUndefined"].includes(name)) {
 				// TODO:AB#4622: OptionalChangeset should obey group axioms, but the current compose implementation does not
 				// cancel changes from inverses, and in some cases the representation isn't sufficient for doing so.
-				// Set operations
+				// Set operations fail to satisfy this test because they generate explicit deltas which set the trait to be
+				// the previous value, rather than noops.
 				continue;
 			}
 			it(`${name}⁻¹ ○ ${name} === ε`, () => {

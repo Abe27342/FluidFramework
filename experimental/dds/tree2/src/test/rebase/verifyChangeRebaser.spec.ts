@@ -4,14 +4,13 @@
  */
 
 import { strict as assert } from "assert";
-import { ChangeRebaser, TaggedChange, noFailure, verifyChangeRebaser, AnchorSet } from "../../core";
+import { ChangeRebaser, TaggedChange, noFailure, verifyChangeRebaser } from "../../core";
 
 const counterRebaser: ChangeRebaser<number> = {
 	compose: (changes: TaggedChange<number>[]) =>
 		changes.map((c) => c.change).reduce((a, b) => a + b, 0),
 	invert: (change: TaggedChange<number>) => -change.change,
 	rebase: (change: TaggedChange<number>, over: TaggedChange<number>) => change,
-	rebaseAnchors: (anchor: AnchorSet, over: number) => {},
 };
 
 const incorrectCounterRebaser: ChangeRebaser<number> = {
@@ -22,7 +21,6 @@ const incorrectCounterRebaser: ChangeRebaser<number> = {
 		...change,
 		change: change.change + 1,
 	}),
-	rebaseAnchors: (anchor: AnchorSet, over: number) => {},
 };
 
 describe("verifyChangeRebaser", () => {

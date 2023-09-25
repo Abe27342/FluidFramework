@@ -22,7 +22,6 @@ import {
 	tagChange,
 	TaggedChange,
 	FieldKindIdentifier,
-	AnchorSet,
 	Delta,
 	FieldKey,
 	UpPath,
@@ -646,7 +645,7 @@ describe("ModularChangeFamily", () => {
 
 	it("build child change", () => {
 		const [changeReceiver, getChanges] = testChangeReceiver(family);
-		const editor = family.buildEditor(changeReceiver, new AnchorSet());
+		const editor = family.buildEditor(changeReceiver);
 		const path: UpPath = {
 			parent: undefined,
 			parentField: fieldA,

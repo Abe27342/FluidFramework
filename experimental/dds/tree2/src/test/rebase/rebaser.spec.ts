@@ -39,8 +39,6 @@ export class DummyChangeRebaser implements ChangeRebaser<typeof dummyChange> {
 	public rebase(change: TaggedChange<typeof dummyChange>): TaggedChange<typeof dummyChange> {
 		return { ...change, change: {} };
 	}
-
-	public rebaseAnchors(): void {}
 }
 
 describe("rebaser", () => {

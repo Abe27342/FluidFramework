@@ -76,17 +76,4 @@ export interface OptionalChangeset {
 	 * TODO: This isn't really `deletedBy` as it is so much `contentBefore`, i.e. similar semantics to how childChange worked before.
 	 */
 	childChanges?: [deletedBy: ChangeAtomId | "self", childChange: NodeChangeset][];
-	// /**
-	//  * Changes to the node which were in the field before this changeset is applied, or the node deleted in this field in the given revision
-	//  */
-	// childChange?: NodeChangeset;
-
-	// /**
-	//  * The change that the node `childChange` is referring to was deleted by.
-	//  * If undefined, `childChange` refers to the node currently in this field.
-	//  *
-	//  * This representation is sufficient for representing changes to the node present before this changeset and
-	//  * after this changeset, but not for changes to nodes that existed only transiently in a transaction.
-	//  */
-	// deletedBy?: ChangeAtomId;
 }

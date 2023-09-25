@@ -4,7 +4,7 @@
  */
 
 import { strict as assert } from "assert";
-import { ChangeRebaser, TaggedChange, AnchorSet } from "../../core";
+import { ChangeRebaser, TaggedChange } from "../../core";
 import { generateFuzzyCombinedChange } from "./fuzz";
 
 const testSeed = 432167897;
@@ -18,7 +18,6 @@ const testRebaser: ChangeRebaser<TestChange> = {
 		...change,
 		change: { C: change.change, O: over.change },
 	}),
-	rebaseAnchors: (anchor: AnchorSet, over: TestChange) => {},
 };
 
 function generateRandomChange(seed: number) {
