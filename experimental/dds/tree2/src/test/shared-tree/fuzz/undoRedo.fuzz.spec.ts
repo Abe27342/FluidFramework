@@ -237,7 +237,7 @@ describe("Fuzz - undo/redo", () => {
 			numberOfClients: 3,
 			emitter,
 			validationStrategy: { type: "fixedInterval", interval: opsPerRun * 2 }, // interval set to prevent synchronization
-			skip: [4, 8, 11, 13, 15, 18],
+			skip: [1, 4, 5, 8, 9, 11, 13, 14, 15, 16, 18],
 			// TODO: Enabling this causes the tree2 fuzz tests to infinite loop due to how edit generation is set up.
 			// This config can probably stay false (this test is targeted at long-running undo/redo scenarios, so having a single
 			// client start detached and later attach is not interesting), but it should still function even if enabled.

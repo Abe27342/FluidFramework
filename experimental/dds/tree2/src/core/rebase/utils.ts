@@ -261,10 +261,17 @@ Bk_A1 := rebase(Bk, pAk)
 	// TODO: Work out how change tagging works.
 	let rebasedSourcePath: GraphCommit<TChange>[] = [];
 	// Rebase over the target path one edit at a time.
-	for (const target of targetPath) {
-		// TODO: Should be targetRebasePath?
+	for (const target of targetRebasePath) {
 		let postbasedEdit = target;
-		for (const sourceCommit of baseSourcePath) {
+		for (let i = 0; i < baseSourcePath.length; i++) {
+			// TODO: Check if this is necessary. It was added before above for loop was converted to targetRebasePath.
+			const sourceCommit = baseSourcePath[i];
+			if (sourceCommit.revision === target.revision) {
+				for (let j = i + 1; j < baseSourcePath.length; j++) {
+					rebasedSourcePath.push(baseSourcePath[j]);
+				}
+				break;
+			}
 			// TODO: confirm it's reasonable to transfer other fields of TaggedChanges to their rebased variants..
 			// Need to push a commit with the same intent as `sourceCommit` but accounting for changes due to
 			// `target`.
@@ -356,7 +363,7 @@ export function rebaseChange<TChange>(
 		0x576 /* branch A and branch B must be related */,
 	);
 
-	// TODO: Typing here is ugly.
+	// TODO: Typing here is ugly. Also this should likely use postbase as well
 	const changeRebasedToRef: TaggedChange<TChange> = sourcePath.reduceRight(
 		(newChange, branchCommit) => ({
 			...newChange,

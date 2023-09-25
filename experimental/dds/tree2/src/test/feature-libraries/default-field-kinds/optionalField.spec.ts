@@ -327,7 +327,7 @@ describe("optionalField", () => {
 					defaultRevisionMetadataFromChanges([revive]),
 				);
 
-				assert.deepEqual(changeToRebase3, changeToRebase);
+				assert.deepEqual(changeToRebase3.change, changeToRebase);
 			});
 		});
 	});

@@ -102,6 +102,7 @@ export type NodeChangeRebaser<TNodeChange> = (
 	change: TNodeChange | undefined,
 	baseChange: TNodeChange | undefined,
 	stateChange?: NodeExistenceState,
+	postbase?: boolean,
 ) => TNodeChange | undefined;
 
 function rebaseMarkList<TNodeChange>(

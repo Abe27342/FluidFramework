@@ -153,6 +153,11 @@ describe("EditManager", () => {
 			{ seq: 4, type: "Pull", ref: 0, from: peer2 },
 		]);
 
+		// TODO: This generates a rebase of peer2's 3 edits onto a branch with 6 edits, which
+		// eventually no-ops but seems like too much work is done in the process.
+		// (i.e. all edits of source branch exist on target branch)
+		// Above statement was made before using targetRebasePath rather than targetPath
+		// in the rebase algorithm. It might not apply, but I want to check before removing.
 		runUnitTestScenario("Can rebase multiple non-interleaved peer changes", [
 			{ seq: 1, type: "Pull", ref: 0, from: peer1 },
 			{ seq: 2, type: "Pull", ref: 1, from: peer1 },
@@ -557,10 +562,14 @@ describe("EditManager", () => {
 					{ seq: 4, type: "Ack" },
 				],
 				new ConstrainedTestChangeRebaser(
-					(change: TestChange, over: TaggedChange<TestChange>): boolean => {
+					(
+						change: TestChange,
+						over: TaggedChange<TestChange>,
+						postbase = false,
+					): boolean => {
 						// This is the only rebase that should happen
-						assert.deepEqual(change.intentions, [4]);
-						assert.deepEqual(over.change.intentions, [3]);
+						assert.deepEqual(change.intentions, postbase ? [3] : [4]);
+						assert.deepEqual(over.change.intentions, postbase ? [4] : [3]);
 						return true;
 					},
 				),
@@ -574,10 +583,14 @@ describe("EditManager", () => {
 					{ seq: 4, type: "Pull", ref: 0, from: peer1 },
 				],
 				new ConstrainedTestChangeRebaser(
-					(change: TestChange, over: TaggedChange<TestChange>): boolean => {
+					(
+						change: TestChange,
+						over: TaggedChange<TestChange>,
+						postbase = false,
+					): boolean => {
 						// This is the only rebase that should happen
-						assert.deepEqual(change.intentions, [4]);
-						assert.deepEqual(over.change.intentions, [3]);
+						assert.deepEqual(change.intentions, postbase ? [3] : [4]);
+						assert.deepEqual(over.change.intentions, postbase ? [4] : [3]);
 						return true;
 					},
 				),
@@ -601,7 +614,7 @@ describe("EditManager", () => {
 				it(`Rebase ${rebasedEditCount} local commits over ${trunkEditCount} trunk commits`, () => {
 					const rebaser = new NoOpChangeRebaser();
 					rebaseLocalEditsOverTrunkEdits(rebasedEditCount, trunkEditCount, rebaser);
-					assert.equal(rebaser.rebasedCount, trunkEditCount * rebasedEditCount ** 2);
+					assert.equal(rebaser.rebasedCount, trunkEditCount * rebasedEditCount * 2);
 					assert.equal(rebaser.invertedCount, trunkEditCount * rebasedEditCount);
 					assert.equal(
 						rebaser.composedCount,

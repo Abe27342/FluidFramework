@@ -286,7 +286,7 @@ describe("Generic FieldKind", () => {
 				crossFieldManager,
 				revisionMetadata,
 			);
-			assert.deepEqual(actual, expected);
+			assert.deepEqual(actual.change, expected);
 		});
 
 		it("Highest index on later change", () => {
@@ -328,7 +328,7 @@ describe("Generic FieldKind", () => {
 				crossFieldManager,
 				revisionMetadata,
 			);
-			assert.deepEqual(actual, expected);
+			assert.deepEqual(actual.change, expected);
 		});
 	});
 

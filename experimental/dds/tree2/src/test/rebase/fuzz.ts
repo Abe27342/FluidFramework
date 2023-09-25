@@ -34,8 +34,8 @@ export function generateFuzzyCombinedChange<TChange>(
 	const compose = rebaser.compose.bind(rebaser);
 	const invert = rebaser.invert.bind(rebaser);
 
-	const revision = random.uuid4() as StableId;
-	let change = tagChange(changeGenerator(seed), revision);
+	const makeRevision = () => random.uuid4() as StableId;
+	let change = tagChange(changeGenerator(seed), makeRevision());
 
 	// Rules for combining changes:
 	// - We must not combine a change with itself
@@ -52,12 +52,12 @@ export function generateFuzzyCombinedChange<TChange>(
 			case Operation.Compose:
 				change = tagChange(
 					compose([change, makeAnonChange(changeGenerator(random.real()))]),
-					revision,
+					makeRevision(),
 				);
 				break;
 			case Operation.Invert:
 				// TODO: test rollback inversions as well
-				change = tagChange(invert(change, false), revision);
+				change = tagChange(invert(change, false), change.revision);
 				break;
 			default:
 				unreachableCase(operation);

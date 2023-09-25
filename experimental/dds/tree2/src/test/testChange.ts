@@ -17,7 +17,7 @@ import {
 } from "../core";
 import { IJsonCodec, makeCodecFamily, makeValueCodec } from "../codec";
 import { RecursiveReadonly, brand } from "../util";
-import { singleTextCursor } from "../feature-libraries";
+import { NodeExistenceState, singleTextCursor } from "../feature-libraries";
 import { deepFreeze } from "./utils";
 
 export interface NonEmptyTestChange {
@@ -118,6 +118,8 @@ function invert(change: TestChange): TestChange {
 function rebase(
 	change: TestChange | undefined,
 	over: TestChange | undefined,
+	stateChange?: NodeExistenceState,
+	postbase: boolean = false,
 ): TestChange | undefined {
 	if (change === undefined) {
 		return undefined;
@@ -133,7 +135,9 @@ function rebase(
 			assert.deepEqual(change.inputContext, over.inputContext);
 			return {
 				inputContext: over.outputContext,
-				outputContext: composeIntentions(over.outputContext, change.intentions),
+				outputContext: postbase
+					? composeIntentions(change.outputContext, over.intentions)
+					: composeIntentions(over.outputContext, change.intentions),
 				intentions: change.intentions,
 			};
 		}
@@ -241,8 +245,12 @@ export class TestChangeRebaser implements ChangeRebaser<TestChange> {
 	public rebase(
 		change: TaggedChange<TestChange>,
 		over: TaggedChange<TestChange>,
+		postbase: boolean = false,
 	): TaggedChange<TestChange> {
-		return { ...change, change: rebase(change.change, over.change) ?? { intentions: [] } };
+		return {
+			...change,
+			change: rebase(change.change, over.change, undefined, postbase) ?? { intentions: [] },
+		};
 	}
 
 	public rebaseAnchors(anchors: AnchorSet, over: TestChange): void {
@@ -293,6 +301,7 @@ export class ConstrainedTestChangeRebaser extends TestChangeRebaser {
 		private readonly constraint: (
 			change: TestChange,
 			over: TaggedChange<TestChange>,
+			postbase?: boolean,
 		) => boolean,
 	) {
 		super();
@@ -301,9 +310,10 @@ export class ConstrainedTestChangeRebaser extends TestChangeRebaser {
 	public rebase(
 		change: TaggedChange<TestChange>,
 		over: TaggedChange<TestChange>,
+		postbase?: boolean,
 	): TaggedChange<TestChange> {
-		assert(this.constraint(change.change, over));
-		return super.rebase(change, over);
+		assert(this.constraint(change.change, over, postbase));
+		return super.rebase(change, over, postbase);
 	}
 }
 

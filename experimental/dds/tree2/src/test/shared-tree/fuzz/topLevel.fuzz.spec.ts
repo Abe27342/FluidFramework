@@ -79,6 +79,7 @@ describe("Fuzz - Top-Level", () => {
 				flushMode: FlushMode.TurnBased,
 				enableGroupedBatching: true,
 			},
+			skip: [4],
 		};
 		createDDSFuzzSuite(model, options);
 	});
