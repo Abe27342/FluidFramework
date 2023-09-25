@@ -363,14 +363,14 @@ describe("optionalField", () => {
 				};
 
 				const actual = optionalChangeRebaser.rebase(
-					changeToRebase,
+					makeAnonChange(changeToRebase),
 					makeAnonChange(baseChange),
 					childRebaser,
 					failIdAllocator,
 					failCrossFieldManager,
 					defaultRevisionMetadataFromChanges([]),
 				);
-				assert.deepEqual(actual, expected);
+				assert.deepEqual(actual.change, expected);
 			});
 		});
 	});
