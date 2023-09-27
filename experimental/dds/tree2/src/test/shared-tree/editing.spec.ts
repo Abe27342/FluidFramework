@@ -24,7 +24,7 @@ const rootNode: UpPath = {
 };
 
 describe("Editing", () => {
-	describe.skip("Sequence Field", () => {
+	describe("Sequence Field", () => {
 		it("concurrent inserts", () => {
 			const tree1 = makeTreeFromJson([]);
 			const tree2 = tree1.fork();
