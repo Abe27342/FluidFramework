@@ -606,7 +606,14 @@ describeFullCompat(`Dehydrate Rehydrate Container Test`, (getTestObjectProvider)
         it("Rehydrate container, create but don't load a data store. Attach rehydrated container and load " +
             "container 2 from another loader. Then load the created dataStore from container 2, make changes to dds " +
             "in it check reflection of changes in rehydrated container",
-        async () => {
+        async function () {
+            if (this.test?.parent?.title?.includes("N-2") && provider.driver.type === "tinylicious") {
+                // 0.58.x doesn't have the fix to routerlicious-driver in this PR:
+                // https://github.com/microsoft/FluidFramework/pull/8913 (also see related issue for more context on the problem:
+                // https://github.com/microsoft/FluidFramework/issues/9163)
+                // This causes this test to hang while loading container2, as the snapshot is over 16KB.
+                this.skip();
+            }
             const { container, defaultDataStore } =
                 await createDetachedContainerAndGetRootDataStore();
 
