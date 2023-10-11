@@ -320,7 +320,9 @@ export const optionalChangeRebaser: FieldChangeRebaser<OptionalChangeset> = {
 
 			for (const [id, childChange] of change.childChanges) {
 				if (id === "self") {
-					const overChildChange = overChildChanges.get(id);
+					// Rationale: when rebasing over a composition, changes to "self" should be rebased over the aggregate changes
+					// to the first removal. This assumes the list is ordered, which needs review.
+					const overChildChange = overChildChanges.get(id) ?? over.childChanges?.[0][1];
 					if (over.fieldChange !== undefined) {
 						// `childChange` refers to the node existing in this field before rebasing, but
 						// that node was removed by `over`.
