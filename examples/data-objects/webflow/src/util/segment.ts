@@ -3,9 +3,9 @@
  * Licensed under the MIT License.
  */
 
-import { ISegment } from "@fluidframework/merge-tree";
+import { ISegment } from "@fluidframework/sequence";
 
 export function getSegmentRange(position: number, segment: ISegment, startOffset = 0) {
-    const start = position - Math.max(startOffset, 0);
-    return { start, end: start + segment.cachedLength };
+	const start = position - Math.max(startOffset, 0);
+	return { start, end: start + segment.cachedLength };
 }

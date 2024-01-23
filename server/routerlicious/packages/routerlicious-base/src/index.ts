@@ -3,7 +3,42 @@
  * Licensed under the MIT License.
  */
 
-export * from "./alfred";
-export * from "./ordering";
-export * from "./riddler";
-export * from "./utils";
+export {
+	AlfredResources,
+	AlfredResourcesFactory,
+	AlfredRunner,
+	AlfredRunnerFactory,
+	DeltaService,
+	DocumentDeleteService,
+	IAlfredResourcesCustomizations,
+	IDocumentDeleteService,
+	OrdererManager,
+} from "./alfred";
+export {
+	NexusResources,
+	NexusResourcesFactory,
+	NexusRunnerFactory,
+	INexusResourcesCustomizations,
+} from "./nexus";
+export { OrderingResourcesFactory } from "./ordering";
+export {
+	MongoTenantRepository,
+	IRiddlerResourcesCustomizations,
+	ITenantDocument,
+	ITenantRepository,
+	RiddlerResources,
+	RiddlerResourcesFactory,
+	RiddlerRunner,
+	RiddlerRunnerFactory,
+	TenantManager,
+} from "./riddler";
+export {
+	catch404,
+	Constants,
+	createDocumentRouter,
+	getIdFromRequest,
+	getSession,
+	getTenantIdFromRequest,
+	handleError,
+	IPlugin,
+} from "./utils";

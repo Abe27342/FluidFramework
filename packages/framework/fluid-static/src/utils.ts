@@ -3,29 +3,40 @@
  * Licensed under the MIT License.
  */
 
-import { IChannelFactory } from "@fluidframework/datastore-definitions";
-import { NamedFluidDataStoreRegistryEntry } from "@fluidframework/runtime-definitions";
+import { type IChannelFactory } from "@fluidframework/datastore-definitions";
 import {
-    ContainerSchema,
-    DataObjectClass,
-    LoadableObjectClass,
-    SharedObjectClass,
-} from "./types";
+	type IFluidDataStoreFactory,
+	type NamedFluidDataStoreRegistryEntry,
+} from "@fluidframework/runtime-definitions";
+import { type IFluidLoadable } from "@fluidframework/core-interfaces";
+import { type ContainerSchema, type DataObjectClass, type SharedObjectClass } from "./types";
+
+/**
+ * An internal type used by the internal type guard isDataObjectClass to cast a
+ * DataObjectClass to a type that is strongly coupled to IFluidDataStoreFactory.
+ * Unlike the external and exported type DataObjectClass  which is
+ * weakly coupled to the IFluidDataStoreFactory to prevent leaking internals.
+ */
+export type InternalDataObjectClass<T extends IFluidLoadable> = DataObjectClass<T> &
+	Record<"factory", IFluidDataStoreFactory>;
 
 /**
  * Runtime check to determine if a class is a DataObject type
  */
-export const isDataObjectClass = (obj: any): obj is DataObjectClass<any> => {
-    return obj?.factory !== undefined;
+export const isDataObjectClass = (obj: unknown): obj is InternalDataObjectClass<IFluidLoadable> => {
+	const maybe = obj as Partial<InternalDataObjectClass<IFluidLoadable>> | undefined;
+	return (
+		maybe?.factory?.IFluidDataStoreFactory !== undefined &&
+		maybe?.factory?.IFluidDataStoreFactory === maybe?.factory
+	);
 };
 
 /**
  * Runtime check to determine if a class is a SharedObject type
  */
-export const isSharedObjectClass = (
-    obj: any,
-): obj is SharedObjectClass<any> => {
-    return obj?.getFactory !== undefined;
+export const isSharedObjectClass = (obj: unknown): obj is SharedObjectClass<IFluidLoadable> => {
+	const maybe = obj as Partial<SharedObjectClass<IFluidLoadable>> | undefined;
+	return maybe?.getFactory !== undefined;
 };
 
 /**
@@ -34,36 +45,33 @@ export const isSharedObjectClass = (
  * of DataObject types and an array of SharedObjects.
  */
 export const parseDataObjectsFromSharedObjects = (
-    schema: ContainerSchema,
+	schema: ContainerSchema,
 ): [NamedFluidDataStoreRegistryEntry[], IChannelFactory[]] => {
-    const registryEntries: Set<NamedFluidDataStoreRegistryEntry> = new Set();
-    const sharedObjects: Set<IChannelFactory> = new Set();
+	const registryEntries = new Set<NamedFluidDataStoreRegistryEntry>();
+	const sharedObjects = new Set<IChannelFactory>();
 
-    const tryAddObject = (obj: LoadableObjectClass<any>) => {
-        if (isSharedObjectClass(obj)) {
-            sharedObjects.add(obj.getFactory());
-        } else if (isDataObjectClass(obj)) {
-            registryEntries.add([
-                obj.factory.type,
-                Promise.resolve(obj.factory),
-            ]);
-        } else {
-            throw new Error(`Entry is neither a DataObject or a SharedObject`);
-        }
-    };
+	const tryAddObject = (obj: unknown): void => {
+		if (isSharedObjectClass(obj)) {
+			sharedObjects.add(obj.getFactory());
+		} else if (isDataObjectClass(obj)) {
+			registryEntries.add([obj.factory.type, Promise.resolve(obj.factory)]);
+		} else {
+			throw new Error(`Entry is neither a DataObject or a SharedObject`);
+		}
+	};
 
-    // Add the object types that will be initialized
-    const dedupedObjects = new Set([
-        ...Object.values(schema.initialObjects),
-        ...(schema.dynamicObjectTypes ?? []),
-    ]);
-    dedupedObjects.forEach(tryAddObject);
+	// Add the object types that will be initialized
+	const dedupedObjects = new Set([
+		...Object.values(schema.initialObjects),
+		...(schema.dynamicObjectTypes ?? []),
+	]);
+	for (const obj of dedupedObjects) {
+		tryAddObject(obj);
+	}
 
-    if (registryEntries.size === 0 && sharedObjects.size === 0) {
-        throw new Error(
-            "Container cannot be initialized without any DataTypes",
-        );
-    }
+	if (registryEntries.size === 0 && sharedObjects.size === 0) {
+		throw new Error("Container cannot be initialized without any DataTypes");
+	}
 
-    return [Array.from(registryEntries), Array.from(sharedObjects)];
+	return [[...registryEntries], [...sharedObjects]];
 };

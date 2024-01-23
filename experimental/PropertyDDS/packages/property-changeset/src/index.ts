@@ -11,18 +11,21 @@ import { TemplateSchema } from "./templateSchema";
 import { TemplateValidator } from "./templateValidator";
 import { Utils } from "./utils";
 
+/**
+ * @internal
+ */
 const { TraversalContext } = Utils;
 
 export {
-    TemplateSchema,
-    TemplateValidator,
-    TypeIdHelper,
-    ChangeSet,
-    Utils,
-    PathHelper,
-    ArrayChangeSetIterator,
-    rebaseToRemoteChanges,
-    SerializedChangeSet,
-    TraversalContext,
-    ExtractedContext,
+	TemplateSchema,
+	TemplateValidator,
+	TypeIdHelper,
+	ChangeSet,
+	Utils,
+	PathHelper,
+	ArrayChangeSetIterator,
+	rebaseToRemoteChanges,
+	SerializedChangeSet,
+	TraversalContext,
+	ExtractedContext,
 };

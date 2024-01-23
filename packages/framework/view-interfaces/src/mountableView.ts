@@ -5,25 +5,32 @@
 
 import { FluidObject } from "@fluidframework/core-interfaces";
 
+/**
+ * @internal
+ */
 export const IFluidMountableView: keyof IProvideFluidMountableView = "IFluidMountableView";
 
+/**
+ * @internal
+ */
 export interface IProvideFluidMountableView {
-    readonly IFluidMountableView: IFluidMountableView;
+	readonly IFluidMountableView: IFluidMountableView;
 }
 
 /**
  * IFluidMountableViewClass defines the statics on our class implementing IFluidMountableView.
+ * @internal
  */
 export interface IFluidMountableViewClass {
-    /**
-     * @param view - The view to make mountable
-     */
-    new(view: FluidObject): IFluidMountableView;
-    /**
-     * Test whether the given view can be successfully mounted by a MountableView.
-     * @param view - the view to test if it can be mounted.
-     */
-    canMount(view: FluidObject): boolean;
+	/**
+	 * @param view - The view to make mountable
+	 */
+	new (view: FluidObject): IFluidMountableView;
+	/**
+	 * Test whether the given view can be successfully mounted by a MountableView.
+	 * @param view - the view to test if it can be mounted.
+	 */
+	canMount(view: FluidObject): boolean;
 }
 
 /**
@@ -36,16 +43,17 @@ export interface IFluidMountableViewClass {
  * This is not intended to be used as a general rendering/mounting approach, but rather as just a specific solution
  * for cross-bundle mounting.  General rendering/mounting should instead use the view adapters or make direct calls
  * to framework-specific rendering APIs.
+ * @internal
  */
 export interface IFluidMountableView extends IProvideFluidMountableView {
-    /**
-     * Mounts the view at the given element.
-     * @param container - the DOM parent of the view we will mount
-     */
-    mount(container: HTMLElement): void;
+	/**
+	 * Mounts the view at the given element.
+	 * @param container - the DOM parent of the view we will mount
+	 */
+	mount(container: HTMLElement): void;
 
-    /**
-     * Performs any necessary cleanup for the view and then removes it from the DOM.
-     */
-    unmount(): void;
+	/**
+	 * Performs any necessary cleanup for the view and then removes it from the DOM.
+	 */
+	unmount(): void;
 }

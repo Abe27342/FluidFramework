@@ -1,26 +1,50 @@
 {
-  "name": "@fluidframework/test-tools",
-  "version": "0.2.0",
-  "description": "Fluid test tools",
-  "homepage": "https://fluidframework.com",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/microsoft/FluidFramework.git",
-    "directory": "tools/test-tools"
-  },
-  "license": "MIT",
-  "author": "Microsoft and contributors",
-  "main": "dist/getTestPort.js",
-  "bin": {
-    "assign-test-ports": "bin/assign-test-ports"
-  },
-  "scripts": {
-    "build": "tsc -b",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "dependencies": {},
-  "devDependencies": {
-    "@types/node": "^14.18.0",
-    "typescript": "~4.5.5"
-  }
+	"name": "@fluidframework/test-tools",
+	"version": "2.0.0",
+	"description": "Fluid test tools",
+	"homepage": "https://fluidframework.com",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/microsoft/FluidFramework.git",
+		"directory": "tools/test-tools"
+	},
+	"license": "MIT",
+	"author": "Microsoft and contributors",
+	"main": "dist/getTestPort.js",
+	"types": "dist/getTestPort.d.ts",
+	"bin": {
+		"assign-test-ports": "bin/assign-test-ports"
+	},
+	"scripts": {
+		"build": "fluid-build --task build",
+		"build:compile": "fluid-build --task compile",
+		"build:test": "tsc --project ./src/test/tsconfig.json",
+		"clean": "rimraf --glob dist \"**/*.tsbuildinfo\" \"**/*.build.log\" nyc",
+		"eslint": "eslint src",
+		"eslint:fix": "eslint src --fix",
+		"format": "npm run prettier:fix",
+		"lint": "fluid-build --task lint",
+		"lint:fix": "npm run prettier:fix && npm run eslint:fix",
+		"prettier": "prettier --check . --cache --ignore-path ../../.prettierignore",
+		"prettier:fix": "prettier --write . --cache --ignore-path ../../.prettierignore",
+		"test": "mocha",
+		"tsc": "tsc"
+	},
+	"devDependencies": {
+		"@fluidframework/build-common": "^2.0.3",
+		"@fluidframework/build-tools": "^0.26.1",
+		"@fluidframework/eslint-config-fluid": "^2.0.0",
+		"@types/mocha": "^10.0.0",
+		"@types/node": "^14.18.0",
+		"eslint": "~8.6.0",
+		"eslint-config-prettier": "~9.0.0",
+		"mocha": "^10.2.0",
+		"mocha-json-output-reporter": "^2.1.0",
+		"mocha-multi-reporters": "^1.5.1",
+		"moment": "^2.21.0",
+		"prettier": "~3.0.3",
+		"rimraf": "^2.6.2",
+		"typescript": "~5.1.6"
+	},
+	"packageManager": "pnpm@7.33.6+sha512.90e27fd38047f18583f3342f784cc3f187f4d4caac89ebc1fffae18dcd7b2dde7678a0bf237481bcb8f7e8e66135fa34803856e4eb2c442ce082ffab5d9d241f"
 }

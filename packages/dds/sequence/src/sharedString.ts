@@ -4,17 +4,15 @@
  */
 
 import {
-    ICombiningOp,
-    IMergeTreeInsertMsg,
-    IMergeTreeRemoveMsg,
-    IMergeTreeTextHelper,
-    IRelativePosition,
-    ISegment,
-    Marker,
-    PropertySet,
-    ReferencePosition,
-    ReferenceType,
-    TextSegment,
+	IMergeTreeTextHelper,
+	IRelativePosition,
+	ISegment,
+	ISegmentAction,
+	Marker,
+	PropertySet,
+	ReferenceType,
+	refHasTileLabel,
+	TextSegment,
 } from "@fluidframework/merge-tree";
 import { IFluidDataStoreRuntime, IChannelAttributes } from "@fluidframework/datastore-definitions";
 import { SharedSegmentSequence } from "./sequence";
@@ -22,30 +20,34 @@ import { SharedStringFactory } from "./sequenceFactory";
 
 /**
  * Fluid object interface describing access methods on a SharedString
+ * @alpha
  */
 export interface ISharedString extends SharedSegmentSequence<SharedStringSegment> {
-    /**
-     * Inserts the text at the position.
-     * @param pos - The position to insert the text at
-     * @param text - The text to insert
-     * @param props - The properties of the text
-     */
-    insertText(pos: number, text: string, props?: PropertySet): void;
+	/**
+	 * Inserts the text at the position.
+	 * @param pos - The position to insert the text at
+	 * @param text - The text to insert
+	 * @param props - The properties of the text
+	 */
+	insertText(pos: number, text: string, props?: PropertySet): void;
 
-    /**
-     * Inserts a marker at the position.
-     * @param pos - The position to insert the marker at
-     * @param refType - The reference type of the marker
-     * @param props - The properties of the marker
-     */
-    insertMarker(pos: number, refType: ReferenceType, props?: PropertySet): IMergeTreeInsertMsg;
+	/**
+	 * Inserts a marker at the position.
+	 * @param pos - The position to insert the marker at
+	 * @param refType - The reference type of the marker
+	 * @param props - The properties of the marker
+	 */
+	insertMarker(pos: number, refType: ReferenceType, props?: PropertySet): void;
 
-    /**
-     * {@inheritDoc SharedSegmentSequence.posFromRelativePos}
-     */
-    posFromRelativePos(relativePos: IRelativePosition): number;
+	/**
+	 * {@inheritDoc SharedSegmentSequence.posFromRelativePos}
+	 */
+	posFromRelativePos(relativePos: IRelativePosition): number;
 }
 
+/**
+ * @alpha
+ */
 export type SharedStringSegment = TextSegment | Marker;
 
 /**
@@ -56,226 +58,224 @@ export type SharedStringSegment = TextSegment | Marker;
  * In addition to text, a Shared String can also contain markers. Markers can be
  * used to store metadata at positions within the text, like the details of an
  * image or Fluid object that should be rendered with the text.
- *
+ * @alpha
  */
-export class SharedString extends SharedSegmentSequence<SharedStringSegment> implements ISharedString {
-    /**
-     * Create a new shared string.
-     * @param runtime - data store runtime the new shared string belongs to
-     * @param id - optional name of the shared string
-     * @returns newly create shared string (but not attached yet)
-     */
-    public static create(runtime: IFluidDataStoreRuntime, id?: string) {
-        return runtime.createChannel(id, SharedStringFactory.Type) as SharedString;
-    }
+export class SharedString
+	extends SharedSegmentSequence<SharedStringSegment>
+	implements ISharedString
+{
+	/**
+	 * Create a new shared string.
+	 * @param runtime - data store runtime the new shared string belongs to
+	 * @param id - optional name of the shared string
+	 * @returns newly create shared string (but not attached yet)
+	 */
+	public static create(runtime: IFluidDataStoreRuntime, id?: string) {
+		return runtime.createChannel(id, SharedStringFactory.Type) as SharedString;
+	}
 
-    /**
-     * Get a factory for SharedString to register with the data store.
-     * @returns a factory that creates and load SharedString
-     */
-    public static getFactory() {
-        return new SharedStringFactory();
-    }
+	/**
+	 * Get a factory for SharedString to register with the data store.
+	 * @returns a factory that creates and load SharedString
+	 */
+	public static getFactory() {
+		return new SharedStringFactory();
+	}
 
-    public get ISharedString(): ISharedString {
-        return this;
-    }
+	public get ISharedString(): ISharedString {
+		return this;
+	}
 
-    private readonly mergeTreeTextHelper: IMergeTreeTextHelper;
+	private readonly mergeTreeTextHelper: IMergeTreeTextHelper;
 
-    constructor(document: IFluidDataStoreRuntime, public id: string, attributes: IChannelAttributes) {
-        super(document, id, attributes, SharedStringFactory.segmentFromSpec);
-        this.mergeTreeTextHelper = this.client.createTextHelper();
-    }
+	constructor(
+		document: IFluidDataStoreRuntime,
+		public id: string,
+		attributes: IChannelAttributes,
+	) {
+		super(document, id, attributes, SharedStringFactory.segmentFromSpec as any);
+		this.mergeTreeTextHelper = this.client.createTextHelper();
+	}
 
-    /**
-     * Inserts a marker at a relative position.
-     * @param relativePos1 - The relative position to insert the marker at
-     * @param refType - The reference type of the marker
-     * @param props - The properties of the marker
-     */
-    public insertMarkerRelative(
-        relativePos1: IRelativePosition,
-        refType: ReferenceType,
-        props?: PropertySet) {
-        const segment = new Marker(refType);
-        if (props) {
-            segment.addProperties(props);
-        }
+	/**
+	 * Inserts a marker at a relative position.
+	 * @param relativePos1 - The relative position to insert the marker at
+	 * @param refType - The reference type of the marker
+	 * @param props - The properties of the marker
+	 */
+	public insertMarkerRelative(
+		relativePos1: IRelativePosition,
+		refType: ReferenceType,
+		props?: PropertySet,
+	): void {
+		const segment = new Marker(refType);
+		if (props) {
+			segment.addProperties(props);
+		}
 
-        const pos = this.posFromRelativePos(relativePos1);
-        const insertOp = this.client.insertSegmentLocal(pos, segment);
-        if (insertOp) {
-            this.submitSequenceMessage(insertOp);
-        }
-    }
+		const pos = this.posFromRelativePos(relativePos1);
+		this.guardReentrancy(() => this.client.insertSegmentLocal(pos, segment));
+	}
 
-    /**
-     * {@inheritDoc ISharedString.insertMarker}
-     */
-    public insertMarker(
-        pos: number,
-        refType: ReferenceType,
-        props?: PropertySet): IMergeTreeInsertMsg {
-        const segment = new Marker(refType);
-        if (props) {
-            segment.addProperties(props);
-        }
+	/**
+	 * {@inheritDoc ISharedString.insertMarker}
+	 */
+	public insertMarker(pos: number, refType: ReferenceType, props?: PropertySet): void {
+		const segment = new Marker(refType);
+		if (props) {
+			segment.addProperties(props);
+		}
 
-        const insertOp = this.client.insertSegmentLocal(pos, segment);
-        if (insertOp) {
-            this.submitSequenceMessage(insertOp);
-        }
-        return insertOp;
-    }
+		this.guardReentrancy(() => this.client.insertSegmentLocal(pos, segment));
+	}
 
-    /**
-     * Inserts the text at the position.
-     * @param relativePos1 - The relative position to insert the text at
-     * @param text - The text to insert
-     * @param props - The properties of text
-     */
-    public insertTextRelative(relativePos1: IRelativePosition, text: string, props?: PropertySet) {
-        const segment = new TextSegment(text);
-        if (props) {
-            segment.addProperties(props);
-        }
+	/**
+	 * Inserts the text at the position.
+	 * @param relativePos1 - The relative position to insert the text at
+	 * @param text - The text to insert
+	 * @param props - The properties of text
+	 */
+	public insertTextRelative(
+		relativePos1: IRelativePosition,
+		text: string,
+		props?: PropertySet,
+	): void {
+		const segment = new TextSegment(text);
+		if (props) {
+			segment.addProperties(props);
+		}
 
-        const pos = this.posFromRelativePos(relativePos1);
-        const insertOp = this.client.insertSegmentLocal(pos, segment);
-        if (insertOp) {
-            this.submitSequenceMessage(insertOp);
-        }
-    }
+		const pos = this.posFromRelativePos(relativePos1);
+		this.guardReentrancy(() => this.client.insertSegmentLocal(pos, segment));
+	}
 
-    /**
-     * {@inheritDoc ISharedString.insertText}
-     */
-    public insertText(pos: number, text: string, props?: PropertySet) {
-        const segment = new TextSegment(text);
-        if (props) {
-            segment.addProperties(props);
-        }
+	/**
+	 * {@inheritDoc ISharedString.insertText}
+	 */
+	public insertText(pos: number, text: string, props?: PropertySet): void {
+		const segment = new TextSegment(text);
+		if (props) {
+			segment.addProperties(props);
+		}
 
-        const insertOp = this.client.insertSegmentLocal(pos, segment);
-        if (insertOp) {
-            this.submitSequenceMessage(insertOp);
-        }
-    }
+		this.guardReentrancy(() => this.client.insertSegmentLocal(pos, segment));
+	}
 
-    /**
-     * Replaces a range with the provided text.
-     * @param start - The inclusive start of the range to replace
-     * @param end - The exclusive end of the range to replace
-     * @param text - The text to replace the range with
-     * @param props - Optional. The properties of the replacement text
-     */
-    public replaceText(start: number, end: number, text: string, props?: PropertySet) {
-        this.replaceRange(start, end, TextSegment.make(text, props));
-    }
+	/**
+	 * Replaces a range with the provided text.
+	 * @param start - The inclusive start of the range to replace
+	 * @param end - The exclusive end of the range to replace
+	 * @param text - The text to replace the range with
+	 * @param props - Optional. The properties of the replacement text
+	 */
+	public replaceText(start: number, end: number, text: string, props?: PropertySet): void {
+		this.replaceRange(start, end, TextSegment.make(text, props));
+	}
 
-    /**
-     * Removes the text in the given range.
-     * @param start - The inclusive start of the range to remove
-     * @param end - The exclusive end of the range to replace
-     * @returns the message sent.
-     */
-    public removeText(start: number, end: number): IMergeTreeRemoveMsg {
-        return this.removeRange(start, end);
-    }
+	/**
+	 * Removes the text in the given range.
+	 * @param start - The inclusive start of the range to remove
+	 * @param end - The exclusive end of the range to replace
+	 * @returns the message sent.
+	 */
+	public removeText(start: number, end: number): void {
+		this.removeRange(start, end);
+	}
 
-    /**
-     * Annotates the marker with the provided properties and calls the callback on consensus.
-     * @param marker - The marker to annotate
-     * @param props - The properties to annotate the marker with
-     * @param consensusCallback - The callback called when consensus is reached
-     */
-    public annotateMarkerNotifyConsensus(
-        marker: Marker,
-        props: PropertySet,
-        callback: (m: Marker) => void) {
-        const annotateOp = this.client.annotateMarkerNotifyConsensus(marker, props, callback);
-        if (annotateOp) {
-            this.submitSequenceMessage(annotateOp);
-        }
-    }
+	/**
+	 * Annotates the marker with the provided properties.
+	 * @param marker - The marker to annotate
+	 * @param props - The properties to annotate the marker with
+	 */
+	public annotateMarker(marker: Marker, props: PropertySet) {
+		this.guardReentrancy(() => this.client.annotateMarker(marker, props));
+	}
 
-    /**
-     * Annotates the marker with the provided properties.
-     * @param marker - The marker to annotate
-     * @param props - The properties to annotate the marker with
-     * @param combiningOp - Optional. Specifies how to combine values for the property, such as "incr" for increment.
-     */
-    public annotateMarker(
-        marker: Marker,
-        props: PropertySet,
-        combiningOp?: ICombiningOp) {
-        const annotateOp = this.client.annotateMarker(marker, props, combiningOp);
-        if (annotateOp) {
-            this.submitSequenceMessage(annotateOp);
-        }
-    }
+	/**
+	 * Searches a string for the nearest marker in either direction to a given start position.
+	 * The search will include the start position, so markers at the start position are valid
+	 * results of the search.
+	 * @param startPos - Position at which to start the search
+	 * @param markerLabel - Label of the marker to search for
+	 * @param forwards - Whether the desired marker comes before (false) or after (true) `startPos`
+	 */
+	public searchForMarker(
+		startPos: number,
+		markerLabel: string,
+		forwards = true,
+	): Marker | undefined {
+		return this.client.searchForMarker(startPos, markerLabel, forwards);
+	}
 
-    public findTile(startPos: number | undefined, tileLabel: string, preceding = true): {
-        tile: ReferencePosition;
-        pos: number;
-    } {
-        return this.client.findTile(startPos, tileLabel, preceding);
-    }
+	/**
+	 * Retrieve text from the SharedString in string format.
+	 * @param start - The starting index of the text to retrieve, or 0 if omitted.
+	 * @param end - The ending index of the text to retrieve, or the end of the string if omitted
+	 * @returns The requested text content as a string.
+	 */
+	public getText(start?: number, end?: number) {
+		const segmentWindow = this.client.getCollabWindow();
+		return this.mergeTreeTextHelper.getText(
+			segmentWindow.currentSeq,
+			segmentWindow.clientId,
+			"",
+			start,
+			end,
+		);
+	}
 
-    /**
-     * @deprecated - use the free function `getTextAndMarkers` exported by this package instead.
-     */
-    public getTextAndMarkers(label: string) {
-        const segmentWindow = this.client.getCollabWindow();
-        return this.mergeTreeTextHelper.getTextAndMarkers(segmentWindow.currentSeq, segmentWindow.clientId, label);
-    }
+	/**
+	 * Adds spaces for markers and handles, so that position calculations account for them.
+	 */
+	public getTextWithPlaceholders(start?: number, end?: number) {
+		const segmentWindow = this.client.getCollabWindow();
+		return this.mergeTreeTextHelper.getText(
+			segmentWindow.currentSeq,
+			segmentWindow.clientId,
+			" ",
+			start,
+			end,
+		);
+	}
 
-    /**
-     * Retrieve text from the SharedString in string format.
-     * @param start - The starting index of the text to retrieve, or 0 if omitted.
-     * @param end - The ending index of the text to retrieve, or the end of the string if omitted
-     * @returns The requested text content as a string.
-     */
-    public getText(start?: number, end?: number) {
-        const segmentWindow = this.client.getCollabWindow();
-        return this.mergeTreeTextHelper.getText(segmentWindow.currentSeq, segmentWindow.clientId, "", start, end);
-    }
+	public getTextRangeWithMarkers(start: number, end: number) {
+		const segmentWindow = this.client.getCollabWindow();
+		return this.mergeTreeTextHelper.getText(
+			segmentWindow.currentSeq,
+			segmentWindow.clientId,
+			"*",
+			start,
+			end,
+		);
+	}
 
-    /**
-     * Adds spaces for markers and handles, so that position calculations account for them.
-     */
-    public getTextWithPlaceholders(start?: number, end?: number) {
-        const segmentWindow = this.client.getCollabWindow();
-        return this.mergeTreeTextHelper.getText(segmentWindow.currentSeq, segmentWindow.clientId, " ", start, end);
-    }
+	/**
+	 * Looks up and returns a `Marker` using its id. Returns `undefined` if there is no marker with the provided
+	 * id in this `SharedString`.
+	 */
+	public getMarkerFromId(id: string): ISegment | undefined {
+		return this.client.getMarkerFromId(id);
+	}
 
-    /**
-     * @deprecated - use `getTextWithPlaceholders` instead.
-     */
-    public getTextRangeWithPlaceholders(start: number, end: number) {
-        return this.getTextWithPlaceholders(start, end);
-    }
+	/**
+	 * Revert an op
+	 */
+	protected rollback(content: any, localOpMetadata: unknown): void {
+		if (this.client.rollback !== undefined) {
+			this.client.rollback(content, localOpMetadata);
+		} else {
+			super.rollback(content, localOpMetadata);
+		}
+	}
+}
 
-    public getTextRangeWithMarkers(start: number, end: number) {
-        const segmentWindow = this.client.getCollabWindow();
-        return this.mergeTreeTextHelper.getText(segmentWindow.currentSeq, segmentWindow.clientId, "*", start, end);
-    }
-
-    public getMarkerFromId(id: string): ISegment {
-        return this.client.getMarkerFromId(id);
-    }
-
-    /**
-     * Revert an op
-     */
-    protected rollback(content: any, localOpMetadata: unknown): void {
-        if (this.client.rollback !== undefined) {
-            this.client.rollback(content, localOpMetadata);
-        } else {
-            super.rollback(content, localOpMetadata);
-        }
-    }
+interface ITextAndMarkerAccumulator {
+	parallelText: string[];
+	parallelMarkers: Marker[];
+	parallelMarkerLabel: string;
+	placeholder?: string;
+	tagsInProgress: string[];
+	textSegment: TextSegment;
 }
 
 /**
@@ -283,7 +283,6 @@ export class SharedString extends SharedSegmentSequence<SharedStringSegment> imp
  * @param sharedString - String to retrieve text and markers from
  * @param label - label to split on
  * @returns Two parallel lists of text and markers, split by markers with the provided `label`.
- *
  * For example:
  * ```typescript
  * // Say sharedstring has contents "hello<paragraph marker 1>world<paragraph marker 2>missing".
@@ -292,10 +291,106 @@ export class SharedString extends SharedSegmentSequence<SharedStringSegment> imp
  * // parallelMarkers === [<paragraph marker 1 object>, <paragraph marker 2 object>]
  * // Note parallelText does not include "missing".
  * ```
+ * @internal
  */
-export function getTextAndMarkers(sharedString: SharedString, label: string): {
-    parallelText: string[];
-    parallelMarkers: Marker[];
+export function getTextAndMarkers(
+	sharedString: SharedString,
+	label: string,
+	start?: number,
+	end?: number,
+): {
+	parallelText: string[];
+	parallelMarkers: Marker[];
 } {
-    return sharedString.getTextAndMarkers(label);
+	const accum: ITextAndMarkerAccumulator = {
+		parallelMarkerLabel: label,
+		parallelMarkers: [],
+		parallelText: [],
+		tagsInProgress: [],
+		textSegment: new TextSegment(""),
+	};
+
+	sharedString.walkSegments(gatherTextAndMarkers, start, end, accum);
+	return { parallelText: accum.parallelText, parallelMarkers: accum.parallelMarkers };
 }
+
+const gatherTextAndMarkers: ISegmentAction<ITextAndMarkerAccumulator> = (
+	segment: ISegment,
+	pos: number,
+	refSeq: number,
+	clientId: number,
+	start: number,
+	end: number,
+	accumText: ITextAndMarkerAccumulator,
+) => {
+	const { placeholder, tagsInProgress, textSegment } = accumText;
+	if (TextSegment.is(segment)) {
+		let beginTags = "";
+		let endTags = "";
+		// TODO: let clients pass in function to get tag
+		const tags = [] as string[];
+		const initTags = [] as string[];
+
+		if (segment.properties?.["font-weight"]) {
+			tags.push("b");
+		}
+		if (segment.properties?.["text-decoration"]) {
+			tags.push("u");
+		}
+		const remTags = [] as string[];
+		if (tags.length > 0) {
+			for (const tag of tags) {
+				if (!tagsInProgress.includes(tag)) {
+					beginTags += `<${tag}>`;
+					initTags.push(tag);
+				}
+			}
+			for (const accumTag of tagsInProgress) {
+				if (!tags.includes(accumTag)) {
+					endTags += `</${accumTag}>`;
+					remTags.push(accumTag);
+				}
+			}
+			for (const initTag of initTags.reverse()) {
+				tagsInProgress.push(initTag);
+			}
+		} else {
+			for (const accumTag of tagsInProgress) {
+				endTags += `</${accumTag}>`;
+				remTags.push(accumTag);
+			}
+		}
+		for (const remTag of remTags) {
+			const remdex = tagsInProgress.indexOf(remTag);
+			if (remdex >= 0) {
+				tagsInProgress.splice(remdex, 1);
+			}
+		}
+		textSegment.text += endTags;
+		textSegment.text += beginTags;
+		if (start <= 0 && end >= segment.text.length) {
+			textSegment.text += segment.text;
+		} else {
+			const seglen = segment.text.length;
+			const _start = start < 0 ? 0 : start;
+			const _end = end >= seglen ? undefined : end;
+			textSegment.text += segment.text.substring(_start, _end);
+		}
+	} else {
+		if (placeholder && placeholder.length > 0) {
+			const placeholderText =
+				// eslint-disable-next-line @typescript-eslint/no-base-to-string
+				placeholder === "*" ? `\n${segment}` : placeholder.repeat(segment.cachedLength);
+			textSegment.text += placeholderText;
+		} else {
+			const marker = segment as Marker;
+			if (refHasTileLabel(marker, accumText.parallelMarkerLabel)) {
+				accumText.parallelMarkers.push(marker);
+				accumText.parallelText.push(textSegment.text);
+				textSegment.text = "";
+			}
+		}
+	}
+
+	return true;
+};

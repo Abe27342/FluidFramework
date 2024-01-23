@@ -4,7 +4,12 @@
  */
 
 import { expect } from "chai";
-import { SharedPropertyTree, IPropertyTreeMessage, IRemotePropertyTreeMessage, OpKind } from "../propertyTree";
+import {
+	SharedPropertyTree,
+	IPropertyTreeMessage,
+	IRemotePropertyTreeMessage,
+	OpKind,
+} from "../propertyTree";
 
 describe("PropertyTree", () => {
 	describe("Pruning History", () => {
@@ -46,7 +51,12 @@ describe("PropertyTree", () => {
 				localBranchStart: undefined,
 				sequenceNumber: 2,
 			};
-			const prundedData = SharedPropertyTree.prune(msn, remoteChanges, unrebasedRemoteChanges);
+			const prundedData = SharedPropertyTree.prune(
+				msn,
+				remoteChanges,
+				unrebasedRemoteChanges,
+				"",
+			);
 
 			expect(remoteChanges).to.deep.equal(prundedData.remoteChanges);
 			expect(unrebasedRemoteChanges).to.deep.equal(prundedData.unrebasedRemoteChanges);
@@ -89,7 +99,12 @@ describe("PropertyTree", () => {
 				localBranchStart: undefined,
 				sequenceNumber: 2,
 			};
-			const prundedData = SharedPropertyTree.prune(msn, remoteChanges, unrebasedRemoteChanges);
+			const prundedData = SharedPropertyTree.prune(
+				msn,
+				remoteChanges,
+				unrebasedRemoteChanges,
+				"",
+			);
 			expect(prundedData.prunedCount).to.equal(0);
 			expect(remoteChanges).to.deep.equal(prundedData.remoteChanges);
 			expect(unrebasedRemoteChanges).to.deep.equal(prundedData.unrebasedRemoteChanges);
@@ -145,7 +160,12 @@ describe("PropertyTree", () => {
 				localBranchStart: undefined,
 				sequenceNumber: 3,
 			};
-			const prundedData = SharedPropertyTree.prune(msn, remoteChanges, unrebasedRemoteChanges);
+			const prundedData = SharedPropertyTree.prune(
+				msn,
+				remoteChanges,
+				unrebasedRemoteChanges,
+				"",
+			);
 			expect(prundedData.prunedCount).to.equal(0);
 			expect(remoteChanges).to.deep.equal(prundedData.remoteChanges);
 			expect(unrebasedRemoteChanges).to.deep.equal(prundedData.unrebasedRemoteChanges);
@@ -188,7 +208,12 @@ describe("PropertyTree", () => {
 				localBranchStart: undefined,
 				sequenceNumber: 2,
 			};
-			const prundedData = SharedPropertyTree.prune(msn, remoteChanges, unrebasedRemoteChanges);
+			const prundedData = SharedPropertyTree.prune(
+				msn,
+				remoteChanges,
+				unrebasedRemoteChanges,
+				"",
+			);
 
 			expect(prundedData.prunedCount).to.equal(1);
 			expect(prundedData.remoteChanges.length).to.be.equal(1);
@@ -244,7 +269,12 @@ describe("PropertyTree", () => {
 				localBranchStart: undefined,
 				sequenceNumber: 2,
 			};
-			const prundedData = SharedPropertyTree.prune(msn, remoteChanges, unrebasedRemoteChanges);
+			const prundedData = SharedPropertyTree.prune(
+				msn,
+				remoteChanges,
+				unrebasedRemoteChanges,
+				"",
+			);
 
 			expect(prundedData.prunedCount).to.equal(1);
 			expect(prundedData.remoteChanges.length).to.be.equal(1);
@@ -310,7 +340,12 @@ describe("PropertyTree", () => {
 				localBranchStart: undefined,
 				sequenceNumber: 4,
 			};
-			const prundedData = SharedPropertyTree.prune(msn, remoteChanges, unrebasedRemoteChanges);
+			const prundedData = SharedPropertyTree.prune(
+				msn,
+				remoteChanges,
+				unrebasedRemoteChanges,
+				"",
+			);
 
 			expect(prundedData.prunedCount).to.equal(3);
 			expect(prundedData.remoteChanges.length).to.be.equal(1);
@@ -376,7 +411,12 @@ describe("PropertyTree", () => {
 				sequenceNumber: 2,
 			};
 
-			const prundedData = SharedPropertyTree.prune(msn, remoteChanges, unrebasedRemoteChanges);
+			const prundedData = SharedPropertyTree.prune(
+				msn,
+				remoteChanges,
+				unrebasedRemoteChanges,
+				"",
+			);
 
 			expect(prundedData.prunedCount).to.equal(0);
 			expect(prundedData.remoteChanges.length).to.be.equal(3);
@@ -396,7 +436,7 @@ describe("PropertyTree", () => {
 					referenceGuid: "",
 					remoteHeadGuid: "",
 					localBranchStart: undefined,
-                    metadata: undefined,
+					metadata: undefined,
 				},
 			];
 			const unrebasedRemoteChanges: Record<string, IRemotePropertyTreeMessage> = {};
@@ -408,14 +448,77 @@ describe("PropertyTree", () => {
 				remoteHeadGuid: "",
 				localBranchStart: undefined,
 				sequenceNumber: 1,
-                metadata: undefined,
+				metadata: undefined,
 			};
 
-			const prundedData = SharedPropertyTree.prune(msn, remoteChanges, unrebasedRemoteChanges);
+			const prundedData = SharedPropertyTree.prune(
+				msn,
+				remoteChanges,
+				unrebasedRemoteChanges,
+				"",
+			);
 
 			expect(prundedData.prunedCount).to.equal(0);
 			expect(prundedData.remoteChanges.length).to.be.equal(1);
 			expect(Object.keys(prundedData.unrebasedRemoteChanges).length).to.equal(1);
+		});
+		it("Prune does nothing if unrebased changes point to remote head that is not in the remote changes", () => {
+			/**
+			 * REMOTE CHANGES:      (remoteHead X) - (A,0) - (B,1)
+			 * UNREBASED CHANGES:                 \- (A,0) - (B,1)
+			 * minimum sequence number: 0
+			 */
+			const msn = 0;
+			const remoteChanges: IPropertyTreeMessage[] = [
+				{
+					op: OpKind.ChangeSet,
+					metadata: {},
+					changeSet: {},
+					guid: "A",
+					referenceGuid: "X",
+					remoteHeadGuid: "X",
+					localBranchStart: undefined,
+				},
+				{
+					op: OpKind.ChangeSet,
+					metadata: {},
+					changeSet: {},
+					guid: "B",
+					referenceGuid: "A",
+					remoteHeadGuid: "X",
+					localBranchStart: undefined,
+				},
+			];
+			const unrebasedRemoteChanges: Record<string, IRemotePropertyTreeMessage> = {};
+			unrebasedRemoteChanges.A = {
+				op: OpKind.ChangeSet,
+				metadata: {},
+				changeSet: {},
+				guid: "A",
+				referenceGuid: "X",
+				remoteHeadGuid: "X",
+				localBranchStart: undefined,
+				sequenceNumber: 2,
+			};
+			unrebasedRemoteChanges.B = {
+				op: OpKind.ChangeSet,
+				metadata: {},
+				changeSet: {},
+				guid: "B",
+				referenceGuid: "A",
+				remoteHeadGuid: "X",
+				localBranchStart: undefined,
+				sequenceNumber: 2,
+			};
+			const prundedData = SharedPropertyTree.prune(
+				msn,
+				remoteChanges,
+				unrebasedRemoteChanges,
+				"X",
+			);
+
+			expect(remoteChanges).to.deep.equal(prundedData.remoteChanges);
+			expect(unrebasedRemoteChanges).to.deep.equal(prundedData.unrebasedRemoteChanges);
 		});
 	});
 });

@@ -5,56 +5,110 @@
 
 import { strict as assert } from "assert";
 import { IContainer } from "@fluidframework/container-definitions";
-import { requestFluidObject } from "@fluidframework/runtime-utils";
 import {
-    ITestObjectProvider,
-    createSummarizer,
-    summarizeNow,
-    waitForContainerConnection,
+	ITestObjectProvider,
+	createSummarizer,
+	summarizeNow,
+	waitForContainerConnection,
 } from "@fluidframework/test-utils";
-import { describeNoCompat, ITestDataObject } from "@fluidframework/test-version-utils";
-import { gcTreeKey, ISummarizer } from "@fluidframework/container-runtime";
-import { SummaryType } from "@fluidframework/protocol-definitions";
-import { SharedMap } from "@fluidframework/map";
-import { defaultGCConfig } from "./gcTestConfigs";
+import {
+	describeCompat,
+	ITestDataObject,
+	TestDataObjectType,
+} from "@fluid-private/test-version-utils";
+import { ISummarizer } from "@fluidframework/container-runtime";
+import { ISummaryBlob, SummaryType } from "@fluidframework/protocol-definitions";
+import { gcTreeKey, gcBlobPrefix } from "@fluidframework/runtime-definitions";
+// eslint-disable-next-line import/no-internal-modules
+import { IGarbageCollectionState } from "@fluidframework/container-runtime/test/gc";
+import { defaultGCConfig } from "./gcTestConfigs.js";
 
 /**
  * Validates this scenario: When two DDSes in the same datastore has one change, gets summarized, and then gc is called
  * from loading a new container. We do not want to allow duplicate GC routes to be created in this scenario.
  */
-describeNoCompat("GC Data Store Duplicates", (getTestObjectProvider) => {
-    let provider: ITestObjectProvider;
-    let mainContainer: IContainer;
-    let mainDataStore: ITestDataObject;
+describeCompat("GC Data Store Duplicates", "2.0.0-rc.1.0.0", (getTestObjectProvider, apis) => {
+	const { SharedMap } = apis.dds;
+	let provider: ITestObjectProvider;
+	let mainContainer: IContainer;
+	let mainDataStore: ITestDataObject;
 
-    async function waitForSummary(summarizer: ISummarizer) {
-        await provider.ensureSynchronized();
-        return summarizeNow(summarizer);
-    }
+	async function waitForSummary(summarizer: ISummarizer) {
+		await provider.ensureSynchronized();
+		return summarizeNow(summarizer);
+	}
 
-    beforeEach(async () => {
-        provider = getTestObjectProvider({ syncSummarizer: true });
-        mainContainer = await provider.makeTestContainer(defaultGCConfig);
-        mainDataStore = await requestFluidObject<ITestDataObject>(mainContainer, "default");
-        await waitForContainerConnection(mainContainer);
-    });
+	beforeEach("setup", async () => {
+		provider = getTestObjectProvider({ syncSummarizer: true });
+		mainContainer = await provider.makeTestContainer(defaultGCConfig);
+		mainDataStore = (await mainContainer.getEntryPoint()) as ITestDataObject;
+		await waitForContainerConnection(mainContainer);
+	});
 
-    it("Back routes added by GC are removed when passed from data stores to DDSes", async () => {
-        const dds = SharedMap.create(mainDataStore._runtime);
-        mainDataStore._root.set("dds", dds.handle);
+	it("DDS changes do not create new GC blobs", async () => {
+		const dds = SharedMap.create(mainDataStore._runtime);
+		mainDataStore._root.set("dds", dds.handle);
 
-        const summarizer1 = await createSummarizer(provider, mainContainer);
-        let summaryResult = await waitForSummary(summarizer1);
+		const { summarizer: summarizer1 } = await createSummarizer(provider, mainContainer);
+		let summaryResult = await waitForSummary(summarizer1);
 
-        // Change ds1 but not the root dds
-        dds.set("change", "change1");
+		// Change ds1 but not the root dds
+		dds.set("change", "change1");
 
-        summarizer1.close();
-        const summarizer2 = await createSummarizer(provider, mainContainer, summaryResult.summaryVersion);
-        summaryResult = await waitForSummary(summarizer2);
-        const gcObject = summaryResult.summaryTree.tree[gcTreeKey];
-        assert(gcObject !== undefined, "Expected a gc blob!");
-        assert(gcObject.type === SummaryType.Handle, "Expected a handle!");
-        assert(gcObject.handleType === SummaryType.Tree, "Expected a gc tree handle!");
-    });
+		summarizer1.close();
+		const { summarizer: summarizer2 } = await createSummarizer(
+			provider,
+			mainContainer,
+			undefined,
+			summaryResult.summaryVersion,
+		);
+		summaryResult = await waitForSummary(summarizer2);
+		const gcObject = summaryResult.summaryTree.tree[gcTreeKey];
+		assert(gcObject !== undefined, "Expected a gc blob!");
+		assert(gcObject.type === SummaryType.Handle, "Expected a handle!");
+		assert(gcObject.handleType === SummaryType.Tree, "Expected a gc tree handle!");
+	});
+
+	it("Back routes added by GC are removed when passed from data stores to DDSes", async () => {
+		const dds = SharedMap.create(mainDataStore._runtime);
+		mainDataStore._root.set("dds", dds.handle);
+
+		const { summarizer: summarizer1 } = await createSummarizer(provider, mainContainer);
+		let summaryResult = await waitForSummary(summarizer1);
+
+		// Change ds1 but not the root dds so that the root dds routes are pulled by default
+		dds.set("change", "change1");
+
+		// Create a new dataStore so that the GC blob is regenerated
+		const dataStore =
+			await mainDataStore._context.containerRuntime.createDataStore(TestDataObjectType);
+		await dataStore.trySetAlias("ARootDataStore");
+
+		summarizer1.close();
+		const { summarizer: summarizer2 } = await createSummarizer(
+			provider,
+			mainContainer,
+			undefined,
+			summaryResult.summaryVersion,
+		);
+
+		// Get GC State
+		summaryResult = await waitForSummary(summarizer2);
+		const gcTree = summaryResult.summaryTree.tree[gcTreeKey];
+		assert(gcTree?.type === SummaryType.Tree, "Expected a Tree!");
+		const gcBlob = gcTree.tree[`${gcBlobPrefix}_root`] as ISummaryBlob;
+		const gcState = JSON.parse(gcBlob.content as string) as IGarbageCollectionState;
+
+		// Validate GC State that for each GC node, no route is duplicated
+		for (const [_, gcData] of Object.entries(gcState.gcNodes)) {
+			const seenRoutes = new Set<string>();
+			gcData.outboundRoutes.forEach((route) => {
+				assert(
+					!seenRoutes.has(route),
+					`There should be no duplicate routes! Duplicate Route: ${route}`,
+				);
+				seenRoutes.add(route);
+			});
+		}
+	});
 });

@@ -10,23 +10,27 @@ import { DeflatedPropertyTreeFactory, LZ4PropertyTreeFactory } from "./propertyT
 /**
  * This class is the extension of SharedPropertyTree which compresses
  * the deltas and summaries communicated to the server by Deflate.
+ * @internal
  */
 export class DeflatedPropertyTree extends SharedPropertyTree {
-    public static create(runtime: IFluidDataStoreRuntime, id?: string, queryString?: string) {
-        return runtime.createChannel(id, DeflatedPropertyTreeFactory.Type) as DeflatedPropertyTree;
-    }
+	public static create(runtime: IFluidDataStoreRuntime, id?: string, queryString?: string) {
+		return runtime.createChannel(id, DeflatedPropertyTreeFactory.Type) as DeflatedPropertyTree;
+	}
 
-    public static getFactory(): IChannelFactory {
-        return new DeflatedPropertyTreeFactory();
-    }
+	public static getFactory(): IChannelFactory {
+		return new DeflatedPropertyTreeFactory();
+	}
 }
 
+/**
+ * @internal
+ */
 export class LZ4PropertyTree extends SharedPropertyTree {
-    public static create(runtime: IFluidDataStoreRuntime, id?: string, queryString?: string) {
-        return runtime.createChannel(id, LZ4PropertyTreeFactory.Type) as LZ4PropertyTree;
-    }
+	public static create(runtime: IFluidDataStoreRuntime, id?: string, queryString?: string) {
+		return runtime.createChannel(id, LZ4PropertyTreeFactory.Type) as LZ4PropertyTree;
+	}
 
-    public static getFactory(): IChannelFactory {
-        return new LZ4PropertyTreeFactory();
-    }
+	public static getFactory(): IChannelFactory {
+		return new LZ4PropertyTreeFactory();
+	}
 }

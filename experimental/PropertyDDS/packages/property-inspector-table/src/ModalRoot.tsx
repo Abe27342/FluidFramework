@@ -6,11 +6,14 @@
 import * as React from "react";
 import { ModalConsumer } from "./ModalManager";
 
+/**
+ * @internal
+ */
 export const ModalRoot: React.FunctionComponent = () => (
-  <ModalConsumer>
-    {({ component, props }) => {
-      const Component = component!;
-      return Component ? (<Component {...props}/>) : null;
-    }}
-  </ModalConsumer>
+	<ModalConsumer>
+		{({ component, props }) => {
+			const Component = component!;
+			return Component ? <Component {...props} /> : null;
+		}}
+	</ModalConsumer>
 );

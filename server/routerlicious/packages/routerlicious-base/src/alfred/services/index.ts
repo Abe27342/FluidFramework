@@ -3,4 +3,6 @@
  * Licensed under the MIT License.
  */
 
-export * from "./deltaService";
+export { DeltaService } from "./deltaService";
+export { IDocumentDeleteService, DocumentDeleteService } from "./documentDeleteService";
+export { StorageNameAllocator } from "./storageNameAllocator";

@@ -5,11 +5,12 @@
 
 /**
  * Options to be used with {@link DataBinder.registerOnPath}
+ * @internal
  */
 export interface IRegisterOnPathOptions {
-  replaceExisting?: boolean;
-  /**
-   * If true, the callback is executed after the current ChangeSet processing is complete. The default is false.
-   */
-  isDeferred?: boolean;
+	replaceExisting?: boolean;
+	/**
+	 * If true, the callback is executed after the current ChangeSet processing is complete. The default is false.
+	 */
+	isDeferred?: boolean;
 }

@@ -3,35 +3,60 @@
  * Licensed under the MIT License.
  */
 
-import { ICodeDetailsLoader, IContainer, IFluidModuleWithDetails } from "@fluidframework/container-definitions";
+import {
+	ICodeDetailsLoader,
+	IContainer,
+	IFluidModuleWithDetails,
+} from "@fluidframework/container-definitions";
 import { BaseContainerRuntimeFactory } from "@fluidframework/aqueduct";
-import { ITelemetryBaseLogger } from "@fluidframework/common-definitions";
+import { ITelemetryBaseLogger } from "@fluidframework/core-interfaces";
 import { IFluidFileConverter } from "../../codeLoaderBundle";
 
-async function getCodeLoader(): Promise<ICodeDetailsLoader> {
-    return {
-        load: async (): Promise<IFluidModuleWithDetails> => {
-            return {
-                module: { fluidExport: new BaseContainerRuntimeFactory(new Map()) },
-                details: { package: "no-dynamic-package", config: {} },
-            };
-        },
-    };
+// If the test collateral includes code proposals, the code loader must implement IFluidCodeDetailsComparer, or else
+// the container will immediately be closed.  This implementation is a naive approach that claims all code details are
+// equivalent and are satisfied by the currently loaded module.  This may be appropriate in some cases (e.g. for truly
+// static-loaded modules like this is doing with no-dynamic-package), but it's not a good representation of what ODSP
+// and Loop do in practice.
+// TODO:  Evaluate whether this naive comparison approach is appropriate for the scenario we are trying to test.
+export class SampleCodeLoader implements ICodeDetailsLoader {
+	public get IFluidCodeDetailsComparer() {
+		return this;
+	}
+	public async load(): Promise<IFluidModuleWithDetails> {
+		return {
+			module: {
+				fluidExport: new BaseContainerRuntimeFactory({
+					registryEntries: new Map(),
+					provideEntryPoint: async () => ({
+						myProp: "myValue",
+					}),
+				}),
+			},
+			details: { package: "no-dynamic-package", config: {} },
+		};
+	}
+	public async satisfies() {
+		return true;
+	}
+	public async compare() {
+		return 0;
+	}
 }
 
-async function execute(
-    _container: IContainer,
-    scenario: string,
-    _logger: ITelemetryBaseLogger,
-): Promise<Record<string, string>> {
-    return { "result.txt": scenario };
+async function getCodeLoader(_logger: ITelemetryBaseLogger): Promise<ICodeDetailsLoader> {
+	return new SampleCodeLoader();
 }
 
-async function getFluidExport(): Promise<IFluidFileConverter> {
-    return {
-        codeLoader: await getCodeLoader(),
-        execute,
-    };
+export const executeResult = "result";
+async function execute(_container: IContainer, _options?: string): Promise<string> {
+	return executeResult;
+}
+
+function getFluidExport(): IFluidFileConverter {
+	return {
+		getCodeLoader,
+		execute,
+	};
 }
 
 export const fluidExport = getFluidExport();

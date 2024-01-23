@@ -16,18 +16,15 @@ import { IFluidSerializer } from "./serializer";
  * @param context - The handle context for the container
  * @param bind - Bind any other handles we find in the object against this given handle.
  * @returns Result of strigifying an object
+ * @internal
  */
 export function serializeHandles(
-    value: any,
-    serializer: IFluidSerializer,
-    bind: IFluidHandle,
+	value: any,
+	serializer: IFluidSerializer,
+	bind: IFluidHandle,
 ): string | undefined {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-    return value !== undefined
-        ? serializer.stringify(
-            value,
-            bind)
-        : value;
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-return
+	return value !== undefined ? serializer.stringify(value, bind) : value;
 }
 
 /**
@@ -41,16 +38,15 @@ export function serializeHandles(
  * @param context - The handle context for the container
  * @param bind - Bind any other handles we find in the object against this given handle.
  * @returns The fully-plain object
+ * @alpha
  */
 export function makeHandlesSerializable(
-    value: any,
-    serializer: IFluidSerializer,
-    bind: IFluidHandle,
+	value: any,
+	serializer: IFluidSerializer,
+	bind: IFluidHandle,
 ) {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-    return serializer.encode(
-        value,
-        bind);
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-return
+	return serializer.encode(value, bind);
 }
 
 /**
@@ -60,13 +56,11 @@ export function makeHandlesSerializable(
  * @param serializer - The serializer that knows how to convert serializable-form handles into handle objects
  * @param context - The handle context for the container
  * @returns The mostly-plain object with handle objects within
+ * @alpha
  */
-export function parseHandles(
-    value: any,
-    serializer: IFluidSerializer,
-) {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-    return value !== undefined ? serializer.parse(JSON.stringify(value)) : value;
+export function parseHandles(value: any, serializer: IFluidSerializer) {
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-return
+	return value !== undefined ? serializer.parse(JSON.stringify(value)) : value;
 }
 
 /**
@@ -74,9 +68,13 @@ export function parseHandles(
  * @param key - the key for the blob in the summary
  * @param content - blob content
  * @returns The summary containing the blob
+ * @internal
  */
-export function createSingleBlobSummary(key: string, content: string | Uint8Array): ISummaryTreeWithStats {
-    const builder = new SummaryTreeBuilder();
-    builder.addBlob(key, content);
-    return builder.getSummaryTree();
+export function createSingleBlobSummary(
+	key: string,
+	content: string | Uint8Array,
+): ISummaryTreeWithStats {
+	const builder = new SummaryTreeBuilder();
+	builder.addBlob(key, content);
+	return builder.getSummaryTree();
 }

@@ -3,8 +3,8 @@
  * Licensed under the MIT License.
  */
 
-import { bufferToString, IsoBuffer } from '@fluidframework/common-utils';
-import { IFluidHandle } from '@fluidframework/core-interfaces';
+import { assert } from '@fluidframework/core-utils';
+import { bufferToString } from '@fluid-internal/client-utils';
 import { ISequencedDocumentMessage } from '@fluidframework/protocol-definitions';
 import {
 	IFluidDataStoreRuntime,
@@ -19,22 +19,20 @@ import {
 	createSingleBlobSummary,
 	IFluidSerializer,
 	ISharedObjectEvents,
-	serializeHandles,
 	SharedObject,
 } from '@fluidframework/shared-object-base';
-import { ITelemetryLogger, ITelemetryProperties } from '@fluidframework/common-definitions';
-import { ChildLogger, ITelemetryLoggerPropertyBags, PerformanceEvent } from '@fluidframework/telemetry-utils';
-import { ISummaryTreeWithStats } from '@fluidframework/runtime-definitions';
+import { ITelemetryProperties } from '@fluidframework/core-interfaces';
 import {
-	assert,
-	assertNotUndefined,
-	fail,
-	copyPropertyIfDefined,
-	noop,
-	RestOrArray,
-	unwrapRestOrArray,
-} from './Common';
-import { EditHandle, EditLog, getNumberOfHandlesFromEditLogSummary, OrderedEditSet } from './EditLog';
+	ITelemetryLoggerExt,
+	createChildLogger,
+	ITelemetryLoggerPropertyBags,
+	PerformanceEvent,
+	createSampledLogger,
+	IEventSampler,
+} from '@fluidframework/telemetry-utils';
+import { ISummaryTreeWithStats } from '@fluidframework/runtime-definitions';
+import { fail, copyPropertyIfDefined, RestOrArray, unwrapRestOrArray } from './Common';
+import { EditHandle, EditLog, OrderedEditSet } from './EditLog';
 import {
 	EditId,
 	NodeId,
@@ -65,14 +63,10 @@ import {
 	DetachInternal,
 	Edit,
 	EditLogSummary,
-	EditChunkContents,
 	EditStatus,
-	EditWithoutId,
 	reservedIdCount,
 	SharedTreeEditOp,
 	SharedTreeEditOp_0_0_2,
-	SharedTreeHandleOp,
-	SharedTreeNoOp,
 	SharedTreeOp,
 	SharedTreeOpType,
 	SharedTreeOp_0_0_2,
@@ -95,7 +89,7 @@ import {
 	newEditId,
 	walkTree,
 } from './EditUtilities';
-import { getNodeIdContext, NodeIdContext, NodeIdNormalizer, sequencedIdNormalizer } from './NodeIdUtilities';
+import { getNodeIdContext, NodeIdContext, NodeIdNormalizer } from './NodeIdUtilities';
 import { SharedTreeDiagnosticEvent, SharedTreeEvent } from './EventTypes';
 import { RevisionView } from './RevisionView';
 import { SharedTreeEncoder_0_0_2, SharedTreeEncoder_0_1_1 } from './SharedTreeEncoder';
@@ -109,29 +103,51 @@ import { nilUuid } from './UuidUtilities';
 
 /**
  * The write format and associated options used to construct a `SharedTree`
- * @public
+ * @alpha
  */
 export type SharedTreeArgs<WF extends WriteFormat = WriteFormat> = [writeFormat: WF, options?: SharedTreeOptions<WF>];
 
 /**
  * The type of shared tree options for a given write format
- * @public
+ * @alpha
  */
 export type SharedTreeOptions<
 	WF extends WriteFormat,
-	HistoryCompatibility extends 'Forwards' | 'None' = 'Forwards'
-> = Omit<
-	WF extends WriteFormat.v0_0_2
-		? SharedTreeOptions_0_0_2
-		: WF extends WriteFormat.v0_1_1
-		? SharedTreeOptions_0_1_1
-		: never,
-	HistoryCompatibility extends 'Forwards' ? 'summarizeHistory' : never
->;
+	HistoryCompatibility extends 'Forwards' | 'None' = 'Forwards',
+> = SharedTreeBaseOptions &
+	Omit<
+		WF extends WriteFormat.v0_0_2
+			? SharedTreeOptions_0_0_2
+			: WF extends WriteFormat.v0_1_1
+			? SharedTreeOptions_0_1_1
+			: never,
+		HistoryCompatibility extends 'Forwards' ? 'summarizeHistory' : never
+	>;
+
+/**
+ * Configuration options for SharedTree that are independent of write format versions.
+ * @alpha
+ */
+export interface SharedTreeBaseOptions {
+	/**
+	 * The target number of sequenced edits that the tree will try to store in memory.
+	 * Depending on eviction frequency and the collaboration window, there can be more edits in memory at a given time.
+	 * Edits in the collaboration window are not evicted.
+	 *
+	 * The size is set to infinity by default, meaning that all edits in session are kept within memory.
+	 */
+	inMemoryHistorySize?: number;
+	/**
+	 * The rate at which edits are evicted from memory. This is a factor of the inMemoryHistorySize.
+	 * For example, with the default frequency of inMemoryHistorySize * 2 and a size of 10, the log will evict once it reaches 20 sequenced edits
+	 * down to 10 edits, also keeping any that are still in the collaboration window.
+	 */
+	editEvictionFrequency?: number;
+}
 
 /**
  * Configuration options for a SharedTree with write format 0.0.2
- * @public
+ * @alpha
  */
 export interface SharedTreeOptions_0_0_2 {
 	/**
@@ -153,7 +169,7 @@ export interface SharedTreeOptions_0_0_2 {
 
 /**
  * Configuration options for a SharedTree with write format 0.1.1
- * @public
+ * @alpha
  */
 export interface SharedTreeOptions_0_1_1 {
 	/**
@@ -178,7 +194,7 @@ export interface SharedTreeOptions_0_1_1 {
 /**
  * Factory for SharedTree.
  * Includes history in the summary.
- * @public
+ * @alpha
  */
 export class SharedTreeFactory implements IChannelFactory {
 	/**
@@ -204,8 +220,6 @@ export class SharedTreeFactory implements IChannelFactory {
 	 * @param options - Configuration options for this tree
 	 * @returns A factory that creates `SharedTree`s and loads them from storage.
 	 */
-	constructor(...args: SharedTreeArgs<WriteFormat.v0_0_2>);
-	constructor(...args: SharedTreeArgs<WriteFormat.v0_1_1>);
 	constructor(...args: SharedTreeArgs) {
 		this.args = args;
 	}
@@ -274,7 +288,7 @@ const sortedWriteVersions = [WriteFormat.v0_0_2, WriteFormat.v0_1_1];
 
 /**
  * The arguments included when the EditCommitted SharedTreeEvent is emitted.
- * @public
+ * @alpha
  */
 export interface EditCommittedEventArguments {
 	/** The ID of the edit committed. */
@@ -287,7 +301,7 @@ export interface EditCommittedEventArguments {
 
 /**
  * The arguments included when the {@link SharedTreeEvent.SequencedEditApplied} SharedTreeEvent is emitted.
- * @public
+ * @alpha
  */
 export interface SequencedEditAppliedEventArguments {
 	/** The ID of the edit committed. */
@@ -297,7 +311,7 @@ export interface SequencedEditAppliedEventArguments {
 	/** The tree the edit was applied to. */
 	readonly tree: SharedTree;
 	/** The telemetry logger associated with sequenced edit application. */
-	readonly logger: ITelemetryLogger;
+	readonly logger: ITelemetryLoggerExt;
 	/** The reconciliation path for the edit. See {@link ReconciliationPath} for details. */
 	readonly reconciliationPath: ReconciliationPath;
 	/** The outcome of the sequenced edit being applied. */
@@ -306,7 +320,7 @@ export interface SequencedEditAppliedEventArguments {
 
 /**
  * The outcome of an edit.
- * @public
+ * @alpha
  */
 export type EditApplicationOutcome =
 	| {
@@ -332,7 +346,7 @@ export type EditApplicationOutcome =
 
 /**
  * Events which may be emitted by `SharedTree`. See {@link SharedTreeEvent} for documentation of event semantics.
- * @public
+ * @alpha
  */
 export interface ISharedTreeEvents extends ISharedObjectEvents {
 	(event: 'committedEdit', listener: EditCommittedHandler);
@@ -341,13 +355,13 @@ export interface ISharedTreeEvents extends ISharedObjectEvents {
 
 /**
  * Expected type for a handler of the `EditCommitted` event.
- * @public
+ * @alpha
  */
 export type EditCommittedHandler = (args: EditCommittedEventArguments) => void;
 
 /**
  * Expected type for a handler of the {@link SharedTreeEvent.SequencedEditApplied} event.
- * @public
+ * @alpha
  */
 export type SequencedEditAppliedHandler = (args: SequencedEditAppliedEventArguments) => void;
 
@@ -355,7 +369,7 @@ const sharedTreeTelemetryProperties: ITelemetryLoggerPropertyBags = { all: { isS
 
 /**
  * Contains information resulting from processing stashed shared tree ops
- * @public
+ * @alpha
  */
 export interface StashedLocalOpMetadata {
 	/** A modified version of the edit in an edit op that should be resubmitted rather than the original edit */
@@ -367,7 +381,7 @@ const stashedSessionId = '8477b8d5-cf6c-4673-8345-8f076a8f9bc6' as SessionId;
 
 /**
  * A [distributed tree](../Readme.md).
- * @public
+ * @alpha
  */
 export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeIdContext {
 	/**
@@ -392,27 +406,25 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 
 	public static getFactory(...args: SharedTreeArgs<WriteFormat.v0_1_1>): SharedTreeFactory;
 
-	public static getFactory(...args: SharedTreeArgs): SharedTreeFactory {
-		const [writeFormat] = args;
+	/**
+	 * Get a factory for SharedTree to register with the data store, using the latest write version and default options.
+	 */
+	public static getFactory(): SharedTreeFactory;
+
+	public static getFactory(...args: SharedTreeArgs | []): SharedTreeFactory {
+		const [formatArg, options] = args;
+		const writeFormat = formatArg ?? WriteFormat.v0_1_1;
 		// 	On 0.1.1 documents, due to current code limitations, all clients MUST agree on the value of `summarizeHistory`.
 		//  Note that this means staged rollout changing this value should not be attempted.
 		//  It is possible to update shared-tree to correctly handle such a staged rollout, but that hasn't been implemented.
 		//  See the skipped test in SharedTreeFuzzTests.ts for more details on this issue.
-		switch (writeFormat) {
-			case WriteFormat.v0_0_2:
-				return new SharedTreeFactory(...(args as SharedTreeArgs<WriteFormat.v0_0_2>));
-			case WriteFormat.v0_1_1:
-				return new SharedTreeFactory(...(args as SharedTreeArgs<WriteFormat.v0_1_1>));
-			default:
-				fail('Unknown write format');
-		}
+		return new SharedTreeFactory(writeFormat, options);
 	}
 
 	/**
 	 * The UUID used for attribution of nodes created by this SharedTree. All shared trees with a write format of 0.1.1 or
 	 * greater have a unique attribution ID which may be configured in the constructor. All other shared trees (i.e. those
 	 * with a write format of 0.0.2) use the nil UUID as their attribution ID.
-	 * @public
 	 */
 	public get attributionId(): AttributionId {
 		switch (this.writeFormat) {
@@ -428,7 +440,12 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 		}
 	}
 
+	/**
+	 * This is SharedTree's internal IdCompressor that predates the one in the runtime. If access
+	 * to the IdCompressor is needed, this is the one that should be used.
+	 */
 	private idCompressor: IdCompressor;
+
 	private readonly idNormalizer: NodeIdNormalizer<OpSpaceNodeId> & { tree: SharedTree } = {
 		tree: this,
 		get localSessionId() {
@@ -447,6 +464,8 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	 * The log of completed edits for this SharedTree.
 	 */
 	private editLog: EditLog<ChangeInternal>;
+	private readonly editLogSize?: number;
+	private readonly editEvictionFrequency?: number;
 
 	/**
 	 * As an implementation detail, SharedTree uses a log viewer that caches views of different revisions.
@@ -465,14 +484,11 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	/**
 	 * logger for SharedTree events.
 	 */
-	public readonly logger: ITelemetryLogger;
-	private readonly sequencedEditAppliedLogger: ITelemetryLogger;
+	public readonly logger: ITelemetryLoggerExt;
+	private readonly sequencedEditAppliedLogger: ITelemetryLoggerExt;
 
 	private readonly encoder_0_0_2: SharedTreeEncoder_0_0_2;
 	private encoder_0_1_1: SharedTreeEncoder_0_1_1;
-
-	/** Indicates if the client is the oldest member of the quorum. */
-	private currentIsOldest: boolean;
 
 	private readonly processEditResult = (editResult: EditStatus, editId: EditId): void => {
 		// TODO:#44859: Invalid results should be handled by the app
@@ -497,21 +513,17 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	};
 
 	private summarizeHistory: boolean;
-	private uploadEditChunks: boolean;
 
 	private getHistoryPolicy(options: SharedTreeOptions<WriteFormat, 'Forwards' | 'None'>): {
 		summarizeHistory: boolean;
-		uploadEditChunks: boolean;
 	} {
 		const noCompatOptions = options as SharedTreeOptions<WriteFormat, 'None'>;
 		return typeof noCompatOptions.summarizeHistory === 'object'
 			? {
 					summarizeHistory: true,
-					uploadEditChunks: noCompatOptions.summarizeHistory.uploadEditChunks,
 			  }
 			: {
 					summarizeHistory: noCompatOptions.summarizeHistory ?? false,
-					uploadEditChunks: false,
 			  };
 	}
 
@@ -536,27 +548,36 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 		super(id, runtime, SharedTreeFactory.Attributes, 'fluid_sharedTree_');
 		const historyPolicy = this.getHistoryPolicy(options);
 		this.summarizeHistory = historyPolicy.summarizeHistory;
-		this.uploadEditChunks = historyPolicy.uploadEditChunks;
 
-		// This code is somewhat duplicated from OldestClientObserver because it currently depends on the container runtime
-		// which SharedTree does not have access to.
-		// TODO:#55900: Get rid of copy-pasted OldestClientObserver code
-		const quorum = this.runtime.getQuorum();
-		this.currentIsOldest = this.computeIsOldest();
-		quorum.on('addMember', this.updateOldest);
-		quorum.on('removeMember', this.updateOldest);
-		runtime.on('connected', this.updateOldest);
-		runtime.on('disconnected', this.updateOldest);
-
-		this.logger = ChildLogger.create(runtime.logger, 'SharedTree', sharedTreeTelemetryProperties);
-		this.sequencedEditAppliedLogger = ChildLogger.create(
-			this.logger,
-			'SequencedEditApplied',
-			sharedTreeTelemetryProperties
-		);
+		this.logger = createChildLogger({
+			logger: runtime.logger,
+			namespace: 'SharedTree',
+			properties: sharedTreeTelemetryProperties,
+		});
+		this.sequencedEditAppliedLogger = createChildLogger({
+			logger: this.logger,
+			namespace: 'SequencedEditApplied',
+			properties: sharedTreeTelemetryProperties,
+		});
 
 		const attributionId = (options as SharedTreeOptions<WriteFormat.v0_1_1>).attributionId;
-		this.idCompressor = new IdCompressor(createSessionId(), reservedIdCount, attributionId, this.logger);
+
+		/**
+		 * Because the IdCompressor emits so much telemetry, this function is used to sample
+		 * approximately 5% of all clients. Only the given percentage of sessions will emit telemetry.
+		 */
+		const idCompressorEventSampler: IEventSampler = (() => {
+			const isIdCompressorTelemetryEnabled = Math.random() < 0.05;
+			return {
+				sample: () => {
+					return isIdCompressorTelemetryEnabled;
+				},
+			};
+		})();
+		const idCompressorLoger = createSampledLogger(this.logger, idCompressorEventSampler);
+		this.idCompressor = new IdCompressor(createSessionId(), reservedIdCount, attributionId, idCompressorLoger);
+		this.editLogSize = options.inMemoryHistorySize;
+		this.editEvictionFrequency = options.inMemoryHistorySize;
 		const { editLog, cachingLogViewer } = this.initializeNewEditLogFromSummary(
 			{
 				editChunks: [],
@@ -584,23 +605,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	}
 
 	/**
-	 * Re-computes currentIsOldest and emits an event if it has changed.
-	 * TODO:#55900: Get rid of copy-pasted OldestClientObserver code
-	 */
-	private readonly updateOldest = () => {
-		const oldest = this.computeIsOldest();
-		if (this.currentIsOldest !== oldest) {
-			this.currentIsOldest = oldest;
-			if (oldest) {
-				this.emit('becameOldest');
-				this.logger.sendTelemetryEvent({ eventName: 'BecameOldestClient' });
-			} else {
-				this.emit('lostOldest');
-			}
-		}
-	};
-
-	/**
 	 * Computes the oldest client in the quorum, true by default if the container is detached and false by default if the client isn't connected.
 	 * TODO:#55900: Get rid of copy-pasted OldestClientObserver code
 	 */
@@ -615,7 +619,7 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 			return false;
 		}
 
-		assert(this.runtime.clientId !== undefined, 'Client id should be set if connected.');
+		assert(this.runtime.clientId !== undefined, 0x62d /* Client id should be set if connected. */);
 
 		const quorum = this.runtime.getQuorum();
 		const selfSequencedClient = quorum.getMember(this.runtime.clientId);
@@ -639,7 +643,7 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	 * @returns the current view of the tree.
 	 */
 	public get currentView(): RevisionView {
-		return this.logViewer.getRevisionViewInSession(Number.POSITIVE_INFINITY);
+		return this.logViewer.getRevisionViewInMemory(Number.POSITIVE_INFINITY);
 	}
 
 	/**
@@ -652,7 +656,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	 * @param override - if supplied, calls to `convertToStableNodeId` using the returned node ID will return the override instead of
 	 * the UUID. Calls to `generateNodeId` with the same override always return the same ID. Performance note: passing an override string
 	 * incurs a storage cost that is significantly higher that a node ID without one, and should be avoided if possible.
-	 * @public
 	 */
 	public generateNodeId(override?: string): NodeId {
 		return this.idCompressor.generateCompressedId(override) as NodeId;
@@ -663,7 +666,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	 * may not be used across SharedTree instances, see `generateNodeId` for more).
 	 * The returned value will be a UUID, unless the creation of `id` used an override string (see `generateNodeId` for more).
 	 * The result is safe to persist and re-use across `SharedTree` instances, unlike `NodeId`.
-	 * @public
 	 */
 	public convertToStableNodeId(id: NodeId): StableNodeId {
 		return (this.idCompressor.tryDecompress(id) as StableNodeId) ?? fail('Node id is not known to this SharedTree');
@@ -675,7 +677,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	 * The returned stable ID is undefined if `id` was never created with this SharedTree. If a stable ID is returned, this does not imply
 	 * that there is a node with `id` in the current revision of the tree, only that `id` was at some point generated by some instance of
 	 * this tree.
-	 * @public
 	 */
 	public tryConvertToStableNodeId(id: NodeId): StableNodeId | undefined {
 		return this.idCompressor.tryDecompress(id) as StableNodeId | undefined;
@@ -686,7 +687,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	 * as a UUID corresponding to a `NodeId` or as an override passed to `generateNodeId`.
 	 * If a stable ID is returned, this does not imply that there is a node with `id` in the current revision of the tree, only that
 	 * `id` was at some point generated by an instance of this SharedTree.
-	 * @public
 	 */
 	public convertToNodeId(id: StableNodeId): NodeId {
 		return (
@@ -699,7 +699,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	 * either as a UUID corresponding to a `NodeId` or as an override passed to `generateNodeId`.
 	 * If a stable ID is returned, this does not imply that there is a node with `id` in the current revision of the tree, only that
 	 * `id` was at some point generated by an instance of this SharedTree.
-	 * @public
 	 */
 	public tryConvertToNodeId(id: StableNodeId): NodeId | undefined {
 		return this.idCompressor.tryRecompress(id) as NodeId | undefined;
@@ -709,7 +708,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	 * Returns the attribution ID associated with the SharedTree that generated the given node ID. This is generally only useful for clients
 	 * with a write format of 0.1.1 or greater since older clients cannot be given an attribution ID and will always use the default
 	 * `attributionId` of the tree.
-	 * @public
 	 */
 	public attributeNodeId(id: NodeId): AttributionId {
 		switch (this.writeFormat) {
@@ -727,74 +725,9 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 
 	/**
 	 * @returns the edit history of the tree.
-	 * @public
 	 */
 	public get edits(): OrderedEditSet<InternalizedChange> {
 		return this.editLog as unknown as OrderedEditSet<InternalizedChange>;
-	}
-
-	private deserializeHandle(serializedHandle: string): IFluidHandle<ArrayBufferLike> {
-		const deserializeHandle = this.serializer.parse(serializedHandle);
-		assert(typeof deserializeHandle === 'object');
-		return deserializeHandle as IFluidHandle<ArrayBufferLike>;
-	}
-
-	/**
-	 * Uploads the edit chunk and submits a `SharedTreeHandleOp`.
-	 * This method is fire-and-forget and will swallow any errors that occur during upload or the `onUploadComplete` hook.
-	 * If the upload or op submission does fail then a future client will attempt the submission instead.
-	 */
-	private uploadEditChunk(
-		edits: readonly EditWithoutId<ChangeInternal>[],
-		startRevision: number,
-		onUploadComplete?: () => void
-	): void {
-		this.uploadEditChunkAsync(edits, startRevision).then(onUploadComplete).catch(noop);
-	}
-
-	private async uploadEditChunkAsync(
-		edits: readonly EditWithoutId<ChangeInternal>[],
-		startRevision: number
-	): Promise<void> {
-		assert(this.writeFormat !== WriteFormat.v0_0_2, 'Edit chunking is not supported in v0_0_2');
-		// SPO attachment blob upload limit is set here:
-		// https://onedrive.visualstudio.com/SharePoint%20Online/_git/SPO?path=%2Fsts%2Fstsom%2FPrague%2FSPPragueProtocolConfig.cs&version=GBmaster&line=82&lineEnd=82&lineStartColumn=29&lineEndColumn=116&lineStyle=plain&_a=contents
-		// TODO:#59754: Create chunks based on data buffer size instead of number of edits
-		const blobUploadSizeLimit = 4194304;
-
-		try {
-			const chunkContents = this.encoder_0_1_1.encodeEditChunk(
-				edits,
-				sequencedIdNormalizer(this.idNormalizer),
-				this.interner
-			);
-			const serializedContents = serializeHandles(chunkContents, this.serializer, this.handle);
-			const buffer = IsoBuffer.from(serializedContents);
-			const bufferSize = buffer.byteLength;
-			assert(
-				bufferSize <= blobUploadSizeLimit,
-				`Edit chunk size ${bufferSize} is larger than blob upload size limit of ${blobUploadSizeLimit} bytes.`
-			);
-			const editHandle = await this.runtime.uploadBlob(buffer);
-			const handleOp: SharedTreeHandleOp = {
-				editHandle:
-					serializeHandles(editHandle, this.serializer, this.handle) ??
-					fail('Edit chunk handle could not be serialized.'),
-				startRevision,
-				type: SharedTreeOpType.Handle,
-				version: this.writeFormat,
-			};
-			this.submitOp(handleOp);
-			this.emit(SharedTreeDiagnosticEvent.EditChunkUploaded);
-		} catch (error) {
-			// If chunk load fails, we will try again later in loadCore on the oldest client so we log the error instead of throwing.
-			this.logger.sendErrorEvent(
-				{
-					eventName: 'EditChunkUploadFailure',
-				},
-				error
-			);
-		}
 	}
 
 	/**
@@ -808,7 +741,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	 * Saves this SharedTree into a serialized summary. This is used for testing.
 	 *
 	 * @param summarizer - Optional summarizer to use. If not passed in, SharedTree's summarizer is used.
-	 * @internal
 	 */
 	public saveSerializedSummary(options?: { serializer?: IFluidSerializer }): string {
 		const { serializer } = options ?? {};
@@ -817,8 +749,7 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 
 	/**
 	 * Initialize shared tree with a serialized summary. This is used for testing.
-	 * @returns - statistics about the loaded summary.
-	 * @internal
+	 * @returns Statistics about the loaded summary.
 	 */
 	public loadSerializedSummary(blobData: string): ITelemetryProperties {
 		const summary = deserialize(blobData, this.serializer);
@@ -828,7 +759,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 
 	/**
 	 * Saves this SharedTree into a deserialized summary.
-	 * @internal
 	 */
 	public saveSummary(): SharedTreeSummaryBase {
 		// If local changes exist, emulate the sequencing of those changes.
@@ -838,8 +768,8 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 		// instance of the DataObject is created for generating summaries and will never have local edits.
 		if (this.editLog.numberOfLocalEdits > 0) {
 			assert(
-				this.runtime.attachState !== AttachState.Attached,
-				'Summarizing should not occur with local edits except on first attach.'
+				!this.isAttached(),
+				0x62e /* Summarizing should not occur with local edits except on first attach. */
 			);
 			if (this.writeFormat === WriteFormat.v0_1_1) {
 				// Since we're the first client to attach, we can safely finalize ourselves since we're the only ones who have made IDs.
@@ -851,7 +781,7 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 			this.editLog.sequenceLocalEdits();
 		}
 
-		assert(this.editLog.numberOfLocalEdits === 0, 'generateSummary must not be called with local edits');
+		assert(this.editLog.numberOfLocalEdits === 0, 0x62f /* generateSummary must not be called with local edits */);
 		return this.generateSummary();
 	}
 
@@ -887,7 +817,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 
 	/**
 	 * Initialize shared tree with a deserialized summary.
-	 * @internal
 	 */
 	public loadSummary(summary: SharedTreeSummaryBase): void {
 		const { version: loadedSummaryVersion } = summary;
@@ -908,7 +837,7 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 
 		assert(
 			this.idCompressor.getAllIdsFromLocalSession().next().done === true,
-			'Summary load should not be executed after local state is created.'
+			0x630 /* Summary load should not be executed after local state is created. */
 		);
 
 		let convertedSummary: SummaryContents;
@@ -925,7 +854,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 				const loadedSummaryIncludesHistory = typedSummary.currentTree !== undefined;
 				if (loadedSummaryIncludesHistory !== this.summarizeHistory) {
 					this.summarizeHistory = loadedSummaryIncludesHistory;
-					this.uploadEditChunks = loadedSummaryIncludesHistory;
 					this.encoder_0_1_1 = new SharedTreeEncoder_0_1_1(this.summarizeHistory);
 				}
 
@@ -946,7 +874,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 				formatVersion: WriteFormat.v0_1_1,
 				historySize: editIds.length,
 				totalNumberOfChunks: editChunks.length,
-				uploadedChunks: getNumberOfHandlesFromEditLogSummary(editHistory),
 			});
 		}
 
@@ -958,34 +885,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 			this.processSequencedEditResult,
 			summary.version
 		);
-
-		if (this.runtime.connected) {
-			const noChunksReadyForUpload = this.editLog.getEditChunksReadyForUpload()[Symbol.iterator]().next().done;
-			if (noChunksReadyForUpload === undefined || !noChunksReadyForUpload) {
-				// A client does not become a member of the quorum until it is within the collaboration window.
-				//
-				// The collaboration window is the range from the minimum sequence number enforced by the server and head.
-				// When a client sends an op, they include the last sequence number the client has processed. We call this the reference
-				// sequence number.
-				//
-				// If there are no members in the quorum, we send a no op op in order to have this client added as a member to the quorum.
-				// This is required so we can ensure only the oldest client will upload blobs during summary load.
-				if (this.runtime.getQuorum().getMembers().size === 0) {
-					const noop: SharedTreeNoOp = {
-						type: SharedTreeOpType.NoOp,
-						version: this.writeFormat,
-					};
-
-					this.submitOp(noop);
-					this.logger.sendTelemetryEvent({ eventName: 'NoOpSent' });
-				} else if (this.currentIsOldest) {
-					this.uploadCatchUpBlobs();
-				}
-			}
-
-			// If this client becomes the oldest, it should take care of uploading catch up blobs.
-			this.on('becameOldest', () => this.uploadCatchUpBlobs());
-		}
 	}
 
 	private static eventFromEditResult(editStatus: EditStatus): SharedTreeDiagnosticEvent {
@@ -1015,34 +914,30 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 		// Dispose the current log viewer if it exists. This ensures that re-used EditAddedHandlers below don't retain references to old
 		// log viewers.
 		this.cachingLogViewer?.detachFromEditLog();
-		const indexOfFirstEditInSession =
-			version === WriteFormat.v0_0_2 || (editHistory?.editIds.length === 1 && version === WriteFormat.v0_1_1)
-				? 0
-				: editHistory?.editIds.length;
 
 		// Use previously registered EditAddedHandlers if there is an existing EditLog.
 		const editLog = new EditLog(
 			editHistory,
 			this.logger,
 			this.editLog?.editAddedHandlers,
-			indexOfFirstEditInSession
+			this.editLogSize,
+			this.editEvictionFrequency
 		);
 
 		editLog.on(SharedTreeDiagnosticEvent.UnexpectedHistoryChunk, () => {
 			this.emit(SharedTreeDiagnosticEvent.UnexpectedHistoryChunk);
 		});
 
-		let knownRevisions: [number, EditCacheEntry][] | undefined;
+		let initialRevision: [number, EditCacheEntry] | undefined;
 		if (currentTree !== undefined) {
 			const currentView = RevisionView.fromTree(currentTree);
-			// TODO:#47830: Store multiple checkpoints in summary.
-			knownRevisions = [[editLog.length, { view: currentView }]];
+			initialRevision = [editLog.length, { view: currentView }];
 		}
 
 		const logViewer = new CachingLogViewer(
 			editLog,
 			RevisionView.fromTree(initialTree, this),
-			knownRevisions,
+			initialRevision,
 			editStatusCallback,
 			sequencedEditResultCallback,
 			0
@@ -1054,33 +949,22 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	}
 
 	/**
-	 * Upload any full chunks that have yet to be uploaded.
-	 */
-	private uploadCatchUpBlobs(): void {
-		if (this.writeFormat !== WriteFormat.v0_0_2 && this.uploadEditChunks) {
-			for (const [startRevision, chunk] of this.editLog.getEditChunksReadyForUpload()) {
-				this.uploadEditChunk(chunk, startRevision, () => {
-					this.emit(SharedTreeDiagnosticEvent.CatchUpBlobUploaded);
-					this.logger.sendTelemetryEvent({ eventName: 'CatchUpBlobUpload', chunkSize: chunk.length });
-				});
-			}
-		}
-	}
-
-	/**
 	 * Compares this shared tree to another for equality. Should only be used for internal correctness testing.
 	 *
 	 * Equality means that the histories as captured by the EditLogs are equivalent.
 	 *
 	 * Equality does not include:
-	 *   - if an edit is open
-	 *   - the shared tree's id
-	 *   - local vs sequenced status of edits
-	 *   - registered event listeners
-	 *   - state of caches
 	 *
-	 * @internal
-	 * */
+	 * - if an edit is open
+	 *
+	 * - the shared tree's id
+	 *
+	 * - local vs sequenced status of edits
+	 *
+	 * - registered event listeners
+	 *
+	 * - state of caches
+	 */
 	public equals(sharedTree: SharedTree): boolean {
 		if (!areRevisionViewsSemanticallyEqual(this.currentView, this, sharedTree.currentView, sharedTree)) {
 			return false;
@@ -1128,21 +1012,8 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 		// Update ops should only be processed if they're not the same version.
 		if (sameVersion) {
 			if (type === SharedTreeOpType.Handle) {
-				const { editHandle, startRevision } = op;
-				const baseHandle = this.deserializeHandle(editHandle);
-				const decodedHandle: EditHandle<ChangeInternal> = {
-					get: async () => {
-						const contents = await baseHandle.get();
-						const parsedContents: EditChunkContents = JSON.parse(IsoBuffer.from(contents).toString());
-						return this.encoder_0_1_1.decodeEditChunk(
-							parsedContents,
-							sequencedIdNormalizer(this.idNormalizer),
-							this.interner
-						);
-					},
-					baseHandle,
-				};
-				this.editLog.processEditChunkHandle(decodedHandle, startRevision);
+				// Edit virtualization is no longer supported, log the event and ignore the op.
+				this.logger.sendErrorEvent({ eventName: 'UnexpectedHistoryChunk' });
 			} else if (type === SharedTreeOpType.Edit) {
 				if (op.version === WriteFormat.v0_1_1) {
 					this.idCompressor.finalizeCreationRange(op.idRange);
@@ -1228,22 +1099,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 
 		if (wasLocalEdit) {
 			this.editLog.addSequencedEdit(edit, message);
-			// If this client created the edit that filled up a chunk, it is responsible for uploading that chunk.
-			if (compareSummaryFormatVersions(this.writeFormat, WriteFormat.v0_0_2) > 0 && this.uploadEditChunks) {
-				const lastPair = this.editLog.getLastEditChunk();
-				if (lastPair !== undefined) {
-					const [startRevision, chunk] = lastPair;
-					const edits = assertNotUndefined(chunk.edits);
-					if (edits.length === this.editLog.editsPerChunk) {
-						this.uploadEditChunk(edits, startRevision, () => {
-							this.logger.sendTelemetryEvent({
-								eventName: 'EditChunkUpload',
-								chunkSize: edits.length,
-							});
-						});
-					}
-				}
-			}
 		} else {
 			this.applyEditLocally(edit, message);
 		}
@@ -1273,10 +1128,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 					for (const edit of this.editLog.getLocalEdits()) {
 						this.submitEditOp(edit);
 					}
-
-					if (this.currentIsOldest) {
-						this.uploadCatchUpBlobs();
-					}
 				},
 				{
 					end: true,
@@ -1301,7 +1152,7 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 
 		const unifyHistoricalIds = (context: NodeIdContext): void => {
 			for (let i = 0; i < this.editLog.numberOfSequencedEdits; i++) {
-				const edit = this.editLog.getEditInSessionAtIndex(i);
+				const edit = this.editLog.tryGetEditAtIndex(i) ?? fail('edit not found');
 				convertEditIds(edit, (id) => context.generateNodeId(this.convertToStableNodeId(id)));
 			}
 		};
@@ -1314,13 +1165,13 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 			unifyHistoricalIds(ghostContext);
 			// The same logic applies to string interning, so intern all the strings in the history (superset of those in the current view)
 			for (let i = 0; i < this.editLog.numberOfSequencedEdits; i++) {
-				this.internStringsFromEdit(this.editLog.getEditInSessionAtIndex(i));
+				this.internStringsFromEdit(this.editLog.tryGetEditAtIndex(i) ?? fail('edit not found'));
 			}
 		} else {
 			// Clients do not have the full history, but all share the same current view (sequenced). They can all finalize the same final
 			// IDs for every ID in the view via the ghost compressor.
 			// The same logic applies for the string interner.
-			for (const node of this.logViewer.getRevisionViewInSession(this.editLog.numberOfSequencedEdits)) {
+			for (const node of this.logViewer.getRevisionViewInMemory(this.editLog.numberOfSequencedEdits)) {
 				ghostContext.generateNodeId(this.convertToStableNodeId(node.identifier));
 				this.interner.getOrCreateInternedId(node.definition);
 				for (const label of [...node.traits.keys()].sort()) {
@@ -1340,7 +1191,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	 * This method does not allow for snapshot isolation, as the changes are always applied to the most recent revision.
 	 * If it is desireable to read from and apply changes to a fixed view that does not change when remote changes arrive, `Checkout`
 	 * should be used instead.
-	 * @public
 	 */
 	public applyEdit(...changes: readonly Change[]): Edit<InternalizedChange>;
 	public applyEdit(changes: readonly Change[]): Edit<InternalizedChange>;
@@ -1388,7 +1238,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	 * External users should use one of the more specialized functions, like `applyEdit` which handles constructing the actual `Edit`
 	 * and uses public Change types.
 	 * This is exposed for internal use only.
-	 * @internal
 	 */
 	public applyEditInternal(editOrChanges: Edit<ChangeInternal> | readonly ChangeInternal[]): Edit<ChangeInternal> {
 		let edit: Edit<ChangeInternal>;
@@ -1406,7 +1255,6 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	/**
 	 * Converts a public Change type to an internal representation.
 	 * This is exposed for internal use only.
-	 * @internal
 	 */
 	public internalizeChange(change: Change): ChangeInternal {
 		switch (change.type) {
@@ -1495,12 +1343,11 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	 * Reverts a previous edit by applying a new edit containing the inverse of the original edit's changes.
 	 * @param editId - the edit to revert
 	 * @returns the id of the new edit, or undefined if the original edit could not be inverted given the current tree state.
-	 * @public
 	 */
 	public revert(editId: EditId): EditId | undefined {
 		const index = this.edits.getIndexOfId(editId);
-		const edit = this.edits.getEditInSessionAtIndex(index);
-		const before = this.logViewer.getRevisionViewInSession(index);
+		const edit = this.edits.tryGetEditAtIndex(index) ?? fail('edit not found');
+		const before = this.logViewer.getRevisionViewInMemory(index);
 		const changes = this.revertChanges(edit.changes, before);
 		if (changes === undefined) {
 			return undefined;
@@ -1514,10 +1361,9 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	 * @param changes - the changes to revert
 	 * @param before - the revision view before the changes were originally applied
 	 * @returns the inverse of `changes` or undefined if the changes could not be inverted for the given tree state.
-	 * @internal
 	 */
 	public revertChanges(changes: readonly InternalizedChange[], before: RevisionView): ChangeInternal[] | undefined {
-		return revert(changes as unknown as readonly ChangeInternal[], before, this.logger);
+		return revert(changes as unknown as readonly ChangeInternal[], before, this.logger, this.emit.bind(this));
 	}
 
 	/**
@@ -1556,7 +1402,7 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 	private submitOp(content: SharedTreeOp | SharedTreeOp_0_0_2, localOpMetadata: unknown = undefined): void {
 		assert(
 			compareSummaryFormatVersions(content.version, this.writeFormat) === 0,
-			'Attempted to submit op of wrong version'
+			0x631 /* Attempted to submit op of wrong version */
 		);
 		this.submitLocalMessage(content, localOpMetadata);
 	}
@@ -1603,7 +1449,10 @@ export class SharedTree extends SharedObject<ISharedTreeEvents> implements NodeI
 								break;
 							}
 							case WriteFormat.v0_1_1: {
-								assert(this.stashedIdCompressor !== null, 'Stashed op applied after expected window');
+								assert(
+									this.stashedIdCompressor !== null,
+									0x632 /* Stashed op applied after expected window */
+								);
 								if (this.stashedIdCompressor === undefined) {
 									// Use a temporary compressor that will help translate the stashed ops
 									this.stashedIdCompressor = IdCompressor.deserialize(

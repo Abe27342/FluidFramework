@@ -1,14 +1,12 @@
 {
-    "extends": "@fluidframework/build-common/ts-common-config.json",
-    "exclude": [
-        "src/test/**/*"
-    ],
-    "compilerOptions": {
-        "rootDir": "./src",
-        "outDir": "./dist",
-        "composite": true,
-    },
-    "include": [
-        "src/**/*"
-    ]
+	"extends": [
+		"../../../common/build/build-common/tsconfig.base.json",
+		"../../../common/build/build-common/tsconfig.esm-only.json",
+	],
+	"include": ["src/**/*"],
+	"exclude": ["src/test/**/*"],
+	"compilerOptions": {
+		"rootDir": "./src",
+		"outDir": "./dist",
+	},
 }

@@ -9,11 +9,11 @@ import { expect } from 'chai';
 import {
 	AsyncGenerator,
 	chainAsync as chain,
-	createFuzzDescribe,
+	describeFuzz,
 	makeRandom,
 	takeAsync as take,
 	performFuzzActionsAsync as performFuzzActionsBase,
-} from '@fluid-internal/stochastic-test-utils';
+} from '@fluid-private/stochastic-test-utils';
 import {
 	setUpLocalServerTestSharedTree,
 	testDocumentsPathBase,
@@ -25,8 +25,6 @@ import { areRevisionViewsSemanticallyEqual } from '../../EditUtilities';
 import { SharedTree } from '../../SharedTree';
 import { FuzzTestState, EditGenerationConfig, Operation, FuzzChange } from './Types';
 import { makeOpGenerator } from './Generators';
-
-const describeFuzz = createFuzzDescribe({ defaultTestCount: 1 });
 
 const directory = join(testDocumentsPathBase, 'fuzz-tests');
 
@@ -122,9 +120,10 @@ export async function performFuzzActions(
 						const editLogB = tree.edits;
 						const minEdits = Math.min(editLogA.length, editLogB.length);
 						for (let j = 0; j < minEdits - 1; j++) {
-							const editA = await editLogA.getEditAtIndex(editLogA.length - j - 1);
-							const editB = await editLogB.getEditAtIndex(editLogB.length - j - 1);
-							expect(editA.id).to.equal(editB.id);
+							const editA = editLogA.tryGetEditAtIndex(editLogA.length - j - 1);
+							const editB = editLogB.tryGetEditAtIndex(editLogB.length - j - 1);
+							expect(editA).to.not.be.undefined;
+							expect(editA?.id).to.equal(editB?.id);
 						}
 						expect(areRevisionViewsSemanticallyEqual(tree.currentView, tree, first.currentView, first)).to
 							.be.true;
@@ -182,7 +181,7 @@ export function runSharedTreeFuzzTests(title: string): void {
 	// Some useful tips for debugging fuzz tests:
 	// - A JSON dump of the operation sequence can be written to disk by passing `true` for `saveOnFailure`.
 	// - Different shared-tree instances can be distinguished (e.g. in logs) by using `tree.getRuntime().clientId`
-	describeFuzz(title, (testCount) => {
+	describeFuzz(title, ({ testCount }) => {
 		function runTest(
 			generatorFactory: () => AsyncGenerator<Operation, FuzzTestState>,
 			seed: number,

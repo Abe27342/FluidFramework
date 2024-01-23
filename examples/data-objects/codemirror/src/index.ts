@@ -7,78 +7,75 @@ import { IContainerContext } from "@fluidframework/container-definitions";
 import { ContainerRuntime } from "@fluidframework/container-runtime";
 import { IContainerRuntime } from "@fluidframework/container-runtime-definitions";
 import { IFluidDataStoreFactory } from "@fluidframework/runtime-definitions";
-import { buildRuntimeRequestHandler } from "@fluidframework/request-handler";
-import { mountableViewRequestHandler } from "@fluidframework/aqueduct";
-import {
-    requestFluidObject,
-    RequestParser,
-    RuntimeFactoryHelper,
-} from "@fluidframework/runtime-utils";
+import { RuntimeFactoryHelper } from "@fluidframework/runtime-utils";
 import { MountableView } from "@fluidframework/view-adapters";
+import { FluidObject } from "@fluidframework/core-interfaces";
 import {
-    CodeMirrorComponent,
-    SmdeFactory,
-} from "./codeMirror";
-import {
-    CodeMirrorView,
-} from "./codeMirrorView";
+	IFluidMountableViewEntryPoint,
+	getDataStoreEntryPoint,
+} from "@fluid-example/example-utils";
 
-export {
-    CodeMirrorComponent,
-    SmdeFactory,
-} from "./codeMirror";
-export {
-    CodeMirrorView,
-} from "./codeMirrorView";
+import React from "react";
+
+import { CodeMirrorComponent, SmdeFactory } from "./codeMirror.js";
+import { CodeMirrorReactView } from "./codeMirrorView.js";
+
+export { CodeMirrorComponent, SmdeFactory } from "./codeMirror.js";
+export { CodeMirrorReactView } from "./codeMirrorView.js";
 
 const defaultComponentId = "default";
 
 const smde = new SmdeFactory();
 
-const viewRequestHandler = async (request: RequestParser, runtime: IContainerRuntime) => {
-    if (request.pathParts.length === 0) {
-        const objectRequest = RequestParser.create({
-            url: ``,
-            headers: request.headers,
-        });
-        const codeMirror = await requestFluidObject<CodeMirrorComponent>(
-            await runtime.getRootDataStore(defaultComponentId),
-            objectRequest);
-        return {
-            status: 200,
-            mimeType: "fluid/view",
-            value: new CodeMirrorView(codeMirror.text, codeMirror.presenceManager),
-        };
-    }
-};
-
 class CodeMirrorFactory extends RuntimeFactoryHelper {
-    public async instantiateFirstTime(runtime: ContainerRuntime): Promise<void> {
-        const dataStore = await runtime.createDataStore(smde.type);
-        await dataStore.trySetAlias(defaultComponentId);
-    }
+	public async instantiateFirstTime(runtime: ContainerRuntime): Promise<void> {
+		const dataStore = await runtime.createDataStore(smde.type);
+		await dataStore.trySetAlias(defaultComponentId);
+	}
 
-    public async preInitialize(
-        context: IContainerContext,
-        existing: boolean,
-    ): Promise<ContainerRuntime> {
-        const registry = new Map<string, Promise<IFluidDataStoreFactory>>([
-            [smde.type, Promise.resolve(smde)],
-        ]);
+	public async preInitialize(
+		context: IContainerContext,
+		existing: boolean,
+	): Promise<ContainerRuntime> {
+		const registryEntries = new Map<string, Promise<IFluidDataStoreFactory>>([
+			[smde.type, Promise.resolve(smde)],
+		]);
 
-        const runtime: ContainerRuntime = await ContainerRuntime.load(
-            context,
-            registry,
-            buildRuntimeRequestHandler(
-                mountableViewRequestHandler(MountableView, [viewRequestHandler]),
-            ),
-            undefined, // runtimeOptions
-            undefined, // containerScope
-            existing,
-        );
+		const runtime: ContainerRuntime = await ContainerRuntime.loadRuntime({
+			context,
+			registryEntries,
+			existing,
+			containerScope: context.scope,
+			provideEntryPoint: async (
+				containerRuntime: IContainerRuntime,
+			): Promise<IFluidMountableViewEntryPoint> => {
+				const codeMirror = await getDataStoreEntryPoint<CodeMirrorComponent>(
+					containerRuntime,
+					defaultComponentId,
+				);
 
-        return runtime;
-    }
+				const view = React.createElement(CodeMirrorReactView, {
+					text: codeMirror.text,
+					presenceManager: codeMirror.presenceManager,
+				}) as any;
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-return
+				let getMountableDefaultView = async () => view;
+				if (MountableView.canMount(view)) {
+					getMountableDefaultView = async () => new MountableView(view);
+				}
+
+				return {
+					getDefaultDataObject: async () => codeMirror as FluidObject,
+					getMountableDefaultView,
+				};
+			},
+		});
+
+		return runtime;
+	}
 }
 
+/**
+ * @internal
+ */
 export const fluidExport = new CodeMirrorFactory();

@@ -1,5 +1,0 @@
-{
-    "tags": [ "sequence-change-family" ],
-    "exports": [ "index" ],
-    "imports": [ "change-family", "changeset", "forest", "rebase", "tree", "util", "feature-libraries" ]
-}

@@ -2,153 +2,270 @@
  * Copyright (c) Microsoft Corporation and contributors. All rights reserved.
  * Licensed under the MIT License.
  */
-
-import { Context, getResolvedFluidRoot, GitRepo, Logger } from "@fluidframework/build-tools";
-import { Command, Flags } from "@oclif/core";
+import { Command, Flags, Interfaces } from "@oclif/core";
 // eslint-disable-next-line import/no-internal-modules
-import { FlagInput, OutputFlags, ParserOutput } from "@oclif/core/lib/interfaces";
+import { type PrettyPrintableError } from "@oclif/core/lib/interfaces";
 import chalk from "chalk";
-import { rootPathFlag } from "./flags";
 
-// This is needed to get type safety working in derived classes.
-// https://github.com/oclif/oclif.github.io/pull/142
-export type InferredFlagsType<T> = T extends FlagInput<infer F>
-    ? F & { json: boolean | undefined }
-    : any;
+import { Context, GitRepo, getResolvedFluidRoot } from "@fluidframework/build-tools";
+
+import { rootPathFlag } from "./flags";
+import { indentString } from "./lib";
+import { CommandLogger } from "./logging";
 
 /**
- * A base command that sets up common flags that all commands should have. All commands should have this class in their
- * inheritance chain.
+ * A type representing all the flags of the base commands and subclasses.
  */
-export abstract class BaseCommand<T extends typeof BaseCommand.flags> extends Command {
-    static flags = {
-        root: rootPathFlag(),
-        timer: Flags.boolean({
-            default: false,
-            hidden: true,
-        }),
-        verbose: Flags.boolean({
-            char: "v",
-            description: "Verbose logging.",
-            required: false,
-        }),
-    };
+export type Flags<T extends typeof Command> = Interfaces.InferredFlags<
+	(typeof BaseCommand)["baseFlags"] & T["flags"]
+>;
+export type Args<T extends typeof Command> = Interfaces.InferredArgs<T["args"]>;
 
-    protected parsedOutput?: ParserOutput<any, any>;
+/**
+ * A base command that sets up common flags that all commands should have. Most commands should have this class in their
+ * inheritance chain.
+ *
+ * @remarks
+ *
+ * This implementation is based on the documentation at https://oclif.io/docs/base_class
+ */
+export abstract class BaseCommand<T extends typeof Command>
+	extends Command
+	implements CommandLogger
+{
+	/**
+	 * The flags defined on the base class.
+	 */
+	static readonly baseFlags = {
+		root: rootPathFlag({
+			helpGroup: "GLOBAL",
+		}),
+		verbose: Flags.boolean({
+			char: "v",
+			description: "Enable verbose logging.",
+			helpGroup: "LOGGING",
+			exclusive: ["quiet"],
+			required: false,
+			default: false,
+		}),
+		quiet: Flags.boolean({
+			description: "Disable all logging.",
+			helpGroup: "LOGGING",
+			exclusive: ["verbose"],
+			required: false,
+			default: false,
+		}),
+		timer: Flags.boolean({
+			default: false,
+			hidden: true,
+			helpGroup: "GLOBAL",
+		}),
+	} as const;
 
-    /** The processed arguments that were passed to the CLI. */
-    get processedArgs(): { [name: string]: any } {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-        return this.parsedOutput?.args ?? {};
-    }
+	protected flags!: Flags<T>;
+	protected args!: Args<T>;
 
-    /** The processed flags that were passed to the CLI. */
-    get processedFlags(): InferredFlagsType<T> {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-        return this.parsedOutput?.flags ?? {};
-    }
+	/**
+	 * If true, all logs except those sent using the .log function will be suppressed.
+	 */
+	private suppressLogging: boolean = false;
 
-    /** The flags defined on the base class. */
-    private get baseFlags() {
-        return this.processedFlags as Partial<OutputFlags<typeof BaseCommand.flags>>;
-    }
+	private _context: Context | undefined;
+	private _logger: CommandLogger | undefined;
 
-    private _context: Context | undefined;
-    private _logger: Logger | undefined;
+	public async init(): Promise<void> {
+		await super.init();
 
-    async init() {
-        this.parsedOutput = await this.parse(this.ctor);
-    }
+		const { args, flags } = await this.parse({
+			flags: this.ctor.flags,
+			baseFlags: (super.ctor as typeof BaseCommand).baseFlags,
+			enableJsonFlag: this.ctor.enableJsonFlag,
+			args: this.ctor.args,
+			strict: this.ctor.strict,
+		});
+		this.flags = flags as Flags<T>;
+		this.args = args as Args<T>;
 
-    async catch(err: any) {
-        // add any custom logic to handle errors from the command
-        // or simply return the parent class error handling
-        return super.catch(err);
-    }
+		this.suppressLogging = this.flags.quiet;
+	}
 
-    async finally(err: any) {
-        // called after run and catch regardless of whether or not the command errored
-        return super.finally(err);
-    }
+	protected async catch(err: Error & { exitCode?: number }): Promise<unknown> {
+		// add any custom logic to handle errors from the command
+		// or simply return the parent class error handling
+		return super.catch(err);
+	}
 
-    /**
-     * @returns A default logger that can be passed to core functions enabling them to log using the command logging
-     * system */
-    protected async getLogger(): Promise<Logger> {
-        if (this._logger === undefined) {
-            this._logger = {
-                log: (msg: string | Error) => {
-                    this.log(msg.toString());
-                },
-                logWarning: this.warn.bind(this),
-                logError: (msg: string | Error) => {
-                    this.error(msg);
-                },
-                logVerbose: (msg: string | Error) => {
-                    this.verbose(msg);
-                },
-            };
-        }
+	protected async finally(_: Error | undefined): Promise<unknown> {
+		// called after run and catch regardless of whether or not the command errored
+		return super.finally(_);
+	}
 
-        return this._logger;
-    }
+	/**
+	 * A default logger that can be passed to core functions enabling them to log using the command logging
+	 * system
+	 */
+	protected get logger(): CommandLogger {
+		if (this._logger === undefined) {
+			this._logger = {
+				log: this.log.bind(this),
+				info: this.info.bind(this),
+				warning: this.warning.bind(this),
+				errorLog: this.errorLog.bind(this),
+				verbose: this.verbose.bind(this),
+				logHr: this.logHr.bind(this),
+				logIndent: this.logIndent.bind(this),
+			};
+		}
 
-    /**
-     * The repo {@link Context}. The context is retrieved and cached the first time this method is called. Subsequent
-     * calls will return the cached context.
-     *
-     * @returns The repo {@link Context}.
-     */
-    async getContext(): Promise<Context> {
-        if (this._context === undefined) {
-            const resolvedRoot = await getResolvedFluidRoot();
-            const gitRepo = new GitRepo(resolvedRoot);
-            const branch = await gitRepo.getCurrentBranchName();
-            const logger = await this.getLogger();
+		return this._logger;
+	}
 
-            this.verbose(`Repo: ${resolvedRoot}`);
-            this.verbose(`Branch: ${branch}`);
+	/**
+	 * The repo {@link Context}. The context is retrieved and cached the first time this method is called. Subsequent
+	 * calls will return the cached context.
+	 *
+	 * @returns The repo {@link Context}.
+	 */
+	async getContext(): Promise<Context> {
+		if (this._context === undefined) {
+			const resolvedRoot = await (this.flags.root ?? getResolvedFluidRoot());
+			const gitRepo = new GitRepo(resolvedRoot);
+			const branch = await gitRepo.getCurrentBranchName();
 
-            this._context = new Context(
-                gitRepo,
-                "github.com/microsoft/FluidFramework",
-                branch,
-                logger,
-            );
-        }
+			this.verbose(`Repo: ${resolvedRoot}`);
+			this.verbose(`Branch: ${branch}`);
 
-        return this._context;
-    }
+			this._context = new Context(gitRepo, "microsoft/FluidFramework", branch);
+		}
 
-    public warn(message: string | Error): string | Error {
-        this.log(chalk.yellow(`WARNING: ${message}`));
-        return message;
-    }
+		return this._context;
+	}
 
-    public verbose(message: string | Error): string | Error {
-        if (this.baseFlags.verbose === true) {
-            if (typeof message === "string") {
-                this.log(chalk.grey(`VERBOSE: ${message}`));
-            } else {
-                this.log(chalk.red(`VERBOSE: ${message}`));
-            }
-        }
+	/**
+	 * Outputs a horizontal rule.
+	 */
+	public logHr(): void {
+		this.log("=".repeat(Math.max(10, process.stdout.columns)));
+	}
 
-        return message;
-    }
+	/**
+	 * Logs a message with an indent.
+	 */
+	public logIndent(input: string, indentNumber = 2): void {
+		const message = indentString(input, indentNumber);
+		this.log(message);
+	}
 
-    /** Output a horizontal rule. */
-    public logHr() {
-        this.log("=".repeat(72));
-    }
+	/**
+	 * Logs an informational message.
+	 */
+	public info(message: string | Error | undefined): void {
+		if (!this.suppressLogging) {
+			this.log(`INFO: ${message}`);
+		}
+	}
 
-    public logError(message: string | Error) {
-        this.log(chalk.red(`ERROR: ${message}`));
-        this.exit();
-    }
+	/**
+	 * Logs an error without exiting.
+	 */
+	public errorLog(message: string | Error | undefined): void {
+		if (!this.suppressLogging) {
+			this.log(chalk.red(`ERROR: ${message}`));
+		}
+	}
 
-    /** Log a message with an indent. */
-    public logIndent(input: string, indent = 2) {
-        this.log(`${" ".repeat(indent)}${input}`);
-    }
+	/**
+	 * Logs a warning.
+	 */
+	public warning(message: string | Error | undefined): void {
+		if (!this.suppressLogging) {
+			this.log(chalk.yellow(`WARNING: ${message}`));
+		}
+	}
+
+	/**
+	 * Logs a warning with a stack trace in debug mode.
+	 */
+	public warningWithDebugTrace(message: string | Error): string | Error {
+		return this.suppressLogging ? "" : super.warn(message);
+	}
+
+	// eslint-disable-next-line jsdoc/require-description
+	/**
+	 * @deprecated Use {@link BaseCommand.warning} or {@link BaseCommand.warningWithDebugTrace} instead.
+	 */
+	public warn(input: string | Error): string | Error {
+		return this.suppressLogging ? "" : super.warn(input);
+	}
+
+	/**
+	 * Logs an error and exits the process. If you don't want to exit the process use {@link BaseCommand.errorLog}
+	 * instead.
+	 *
+	 * @param input - an Error or a error message string,
+	 * @param options - options for the error handler.
+	 *
+	 * @remarks
+	 *
+	 * This method overrides the oclif Command error method so we can do some formatting on the strings.
+	 */
+	public error(
+		input: string | Error,
+		options: { code?: string | undefined; exit: false } & PrettyPrintableError,
+	): void;
+
+	/**
+	 * Logs an error and exits the process. If you don't want to exit the process use {@link BaseCommand.errorLog}
+	 * instead.
+	 *
+	 * @param input - an Error or a error message string,
+	 * @param options - options for the error handler.
+	 *
+	 * @remarks
+	 *
+	 * This method overrides the oclif Command error method so we can do some formatting on the strings.
+	 */
+	public error(
+		input: string | Error,
+		options?:
+			| ({ code?: string | undefined; exit?: number | undefined } & PrettyPrintableError)
+			| undefined,
+	): never;
+
+	/**
+	 * Logs an error and exits the process. If you don't want to exit the process use {@link BaseCommand.errorLog}
+	 * instead.
+	 *
+	 * @param input - an Error or a error message string,
+	 * @param options - options for the error handler.
+	 *
+	 * @remarks
+	 *
+	 * This method overrides the oclif Command error method so we can do some formatting on the strings.
+	 */
+	public error(input: unknown, options?: unknown): void {
+		if (!this.suppressLogging) {
+			if (typeof input === "string") {
+				// Ignoring lint error because the typings here come from oclif and the options type oclif has is complex. It's
+				// not worth replicating in this call.
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any
+				super.error(chalk.red(input), options as any);
+			}
+
+			// Ignoring lint error because the typings here come from oclif and the options type oclif has is complex. It's
+			// not worth replicating in this call.
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any
+			return super.error(input as Error, options as any);
+		}
+	}
+
+	/**
+	 * Logs a verbose log statement.
+	 */
+	public verbose(message: string | Error | undefined): void {
+		if (this.flags.verbose === true) {
+			const color = typeof message === "string" ? chalk.grey : chalk.red;
+			this.log(color(`VERBOSE: ${message}`));
+		}
+	}
 }

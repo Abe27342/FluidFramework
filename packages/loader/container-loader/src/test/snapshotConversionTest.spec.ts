@@ -4,86 +4,97 @@
  */
 
 import { strict as assert } from "assert";
-import { bufferToString } from "@fluidframework/common-utils";
 import { ISummaryTree, SummaryType } from "@fluidframework/protocol-definitions";
-import { convertProtocolAndAppSummaryToSnapshotTree } from "../utils";
+import {
+	combineAppAndProtocolSummary,
+	getSnapshotTreeAndBlobsFromSerializedContainer,
+} from "../utils";
 
 describe("Dehydrate Container", () => {
-    it("Summary to snapshot conversion", async () => {
-        const protocolSummary: ISummaryTree = {
-            type: SummaryType.Tree,
-            tree: {
-                attributes: {
-                    type: SummaryType.Blob,
-                    content: JSON.stringify("attributes"),
-                },
-                quorumValues: {
-                    type: SummaryType.Blob,
-                    content: JSON.stringify("quorumValues"),
-                },
-            },
-        };
-        const appSummary: ISummaryTree = {
-            type: SummaryType.Tree,
-            tree: {
-                default: {
-                    type: SummaryType.Tree,
-                    tree: {
-                        ".component": {
-                            type: SummaryType.Blob,
-                            content: JSON.stringify("defaultDataStore"),
-                        },
-                        "root": {
-                            type: SummaryType.Tree,
-                            tree: {
-                                attributes: {
-                                    type: SummaryType.Blob,
-                                    content: JSON.stringify("rootattributes"),
-                                },
-                            },
-                        },
-                        "unref": {
-                            type: SummaryType.Tree,
-                            tree: {},
-                            unreferenced: true,
-                        },
-                    },
-                },
-            },
-        };
-        const snapshotTree = convertProtocolAndAppSummaryToSnapshotTree(protocolSummary, appSummary);
+	const protocolSummary: ISummaryTree = {
+		type: SummaryType.Tree,
+		tree: {
+			attributes: {
+				type: SummaryType.Blob,
+				content: JSON.stringify("attributes"),
+			},
+			quorumValues: {
+				type: SummaryType.Blob,
+				content: JSON.stringify("quorumValues"),
+			},
+		},
+	};
+	const appSummary: ISummaryTree = {
+		type: SummaryType.Tree,
+		tree: {
+			default: {
+				type: SummaryType.Tree,
+				tree: {
+					".component": {
+						type: SummaryType.Blob,
+						content: JSON.stringify("defaultDataStore"),
+					},
+					"root": {
+						type: SummaryType.Tree,
+						tree: {
+							attributes: {
+								type: SummaryType.Blob,
+								content: JSON.stringify("rootattributes"),
+							},
+						},
+					},
+					"unref": {
+						type: SummaryType.Tree,
+						tree: {},
+						unreferenced: true,
+					},
+				},
+			},
+		},
+	};
 
-        assert.strictEqual(Object.keys(snapshotTree.trees).length, 2, "2 trees should be there");
-        assert.strictEqual(Object.keys(snapshotTree.trees[".protocol"].blobs).length, 2,
-            "2 protocol blobs should be there.");
+	it("Summary to snapshottree and snapshotBlobs conversion", async () => {
+		const combinedSummary = combineAppAndProtocolSummary(appSummary, protocolSummary);
+		const [snapshotTree, snapshotBlobs] =
+			getSnapshotTreeAndBlobsFromSerializedContainer(combinedSummary);
 
-        // Validate the ".component" blob.
-        const defaultDataStoreBlobId = snapshotTree.trees.default.blobs[".component"];
-        assert.strictEqual(
-            JSON.parse(bufferToString(snapshotTree.trees.default.blobsContents[defaultDataStoreBlobId], "utf8")),
-           "defaultDataStore",
-           "The .component blob's content is incorrect",
-        );
+		assert.strictEqual(Object.keys(snapshotTree.trees).length, 2, "2 trees should be there");
+		assert.strictEqual(
+			Object.keys(snapshotTree.trees[".protocol"].blobs).length,
+			2,
+			"2 protocol blobs should be there.",
+		);
 
-        // Validate "root" sub-tree.
-        const rootAttributesBlobId = snapshotTree.trees.default.trees.root.blobs.attributes;
-        assert.strictEqual(
-            JSON.parse(
-                bufferToString(snapshotTree.trees.default.trees.root.blobsContents[rootAttributesBlobId], "utf8")),
-            "rootattributes",
-            "The root sub-tree's content is incorrect",
-        );
-        assert.strictEqual(
-            snapshotTree.trees.default.trees.root.unreferenced,
-            undefined,
-            "The root sub-tree should not be marked as unreferenced",
-        );
+		// Validate the ".component" blob.
+		const defaultDataStoreBlobId = snapshotTree.trees.default.blobs[".component"];
+		const defaultDataStoreBlob = snapshotBlobs[defaultDataStoreBlobId];
+		assert.strict(defaultDataStoreBlob, "defaultDataStoreBlob undefined");
+		assert.strictEqual(
+			JSON.parse(defaultDataStoreBlob),
+			"defaultDataStore",
+			"The .component blob's content is incorrect",
+		);
 
-        // Validate "unref" sub-tree.
-        assert.strictEqual(
-            snapshotTree.trees.default.trees.unref.unreferenced,
-            true,
-            "The unref sub-tree should be marked as unreferenced",
-        );
-    });
+		// Validate "root" sub-tree.
+		const rootAttributesBlobId = snapshotTree.trees.default.trees.root.blobs.attributes;
+		const rootAttributesBlob = snapshotBlobs[rootAttributesBlobId];
+		assert.strict(rootAttributesBlob, "rootAttributesBlob undefined");
+		assert.strictEqual(
+			JSON.parse(rootAttributesBlob),
+			"rootattributes",
+			"The root sub-tree's content is incorrect",
+		);
+		assert.strictEqual(
+			snapshotTree.trees.default.trees.root.unreferenced,
+			undefined,
+			"The root sub-tree should not be marked as unreferenced",
+		);
+
+		// Validate "unref" sub-tree.
+		assert.strictEqual(
+			snapshotTree.trees.default.trees.unref.unreferenced,
+			true,
+			"The unref sub-tree should be marked as unreferenced",
+		);
+	});
 });

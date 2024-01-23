@@ -4,81 +4,111 @@
  */
 
 export {
-    ContainerMessageType,
-    IChunkedOp,
-    ContainerRuntimeMessage,
-    IGCRuntimeOptions,
-    ISummaryRuntimeOptions,
-    ISummaryBaseConfiguration,
-    ISummaryConfigurationHeuristics,
-    ISummaryConfigurationDisableSummarizer,
-    ISummaryConfigurationDisableHeuristics,
-    IContainerRuntimeOptions,
-    IRootSummaryTreeWithStats,
-    isRuntimeMessage,
-    RuntimeMessage,
-    unpackRuntimeMessage,
-    ScheduleManager,
-    agentSchedulerId,
-    ContainerRuntime,
-    RuntimeHeaders,
-    ISummaryConfiguration,
-    DefaultSummaryConfiguration,
+	ISummaryRuntimeOptions,
+	ISummaryBaseConfiguration,
+	ISummaryConfigurationHeuristics,
+	ISummaryConfigurationDisableSummarizer,
+	ISummaryConfigurationDisableHeuristics,
+	IContainerRuntimeOptions,
+	isRuntimeMessage,
+	RuntimeMessage,
+	agentSchedulerId,
+	ContainerRuntime,
+	RuntimeHeaders,
+	AllowTombstoneRequestHeaderKey,
+	AllowInactiveRequestHeaderKey,
+	TombstoneResponseHeaderKey,
+	InactiveResponseHeaderKey,
+	ISummaryConfiguration,
+	DefaultSummaryConfiguration,
+	ICompressionRuntimeOptions,
+	CompressionAlgorithms,
 } from "./containerRuntime";
-export { DeltaScheduler } from "./deltaScheduler";
+export {
+	ContainerMessageType,
+	ContainerRuntimeMessage,
+	IContainerRuntimeMessageCompatDetails,
+	CompatModeBehavior,
+	RecentlyAddedContainerRuntimeMessageDetails,
+	UnknownContainerRuntimeMessage,
+} from "./messageTypes";
+export { IBlobManagerLoadInfo } from "./blobManager";
 export { FluidDataStoreRegistry } from "./dataStoreRegistry";
+export { detectOutboundReferences } from "./dataStores";
 export {
-    gcBlobPrefix,
-    gcTreeKey,
-    IGarbageCollectionRuntime,
-    IGCStats,
-} from "./garbageCollection";
+	GCNodeType,
+	IGCMetadata,
+	GCFeatureMatrix,
+	GCVersion,
+	IGCRuntimeOptions,
+	IMarkPhaseStats,
+	ISweepPhaseStats,
+	IGCStats,
+} from "./gc";
 export {
-    IPendingFlush,
-    IPendingFlushMode,
-    IPendingLocalState,
-    IPendingMessage,
-    IPendingState,
-} from "./pendingStateManager";
-export { Summarizer } from "./summarizer";
+	IAckedSummary,
+	ISummarizer,
+	ISummarizeResults,
+	ISummaryCancellationToken,
+	neverCancelledSummaryToken,
+	Summarizer,
+	SummarizerStopReason,
+	SummaryCollection,
+	EnqueueSummarizeResult,
+	IAckSummaryResult,
+	IBaseSummarizeResult,
+	IBroadcastSummaryResult,
+	ICancellationToken,
+	IConnectableRuntime,
+	IContainerRuntimeMetadata,
+	ICreateContainerMetadata,
+	IEnqueueSummarizeOptions,
+	IGenerateSummaryTreeResult,
+	IGeneratedSummaryStats,
+	INackSummaryResult,
+	IOnDemandSummarizeOptions,
+	IRefreshSummaryAckOptions,
+	ISubmitSummaryOpResult,
+	ISubmitSummaryOptions,
+	ISerializedElection,
+	ISummarizeOptions,
+	ISummarizerEvents,
+	ISummarizerInternalsProvider,
+	ISummarizerRuntime,
+	ISummarizingWarning,
+	IUploadSummaryResult,
+	SubmitSummaryResult,
+	SummarizeResultPart,
+	IClientSummaryWatcher,
+	ISummary,
+	ISummaryCollectionOpEvents,
+	ISummaryAckMessage,
+	ISummaryMetadataMessage,
+	ISummaryNackMessage,
+	ISummaryOpMessage,
+	OpActionEventListener,
+	OpActionEventName,
+	ICancellableSummarizerController,
+	SubmitSummaryFailureData,
+	SummaryStage,
+	IRetriableFailureResult,
+	ISummarizeEventProps,
+} from "./summary";
+export { IChunkedOp, unpackRuntimeMessage } from "./opLifecycle";
+
+// Re-exports for backwards compatibility.
+// Will be removed in the future.
 export {
-    EnqueueSummarizeResult,
-    IAckSummaryResult,
-    IBaseSummarizeResult,
-    IBroadcastSummaryResult,
-    ICancellationToken,
-    IConnectableRuntime,
-    IEnqueueSummarizeOptions,
-    IGenerateSummaryTreeResult,
-    IGeneratedSummaryStats,
-    INackSummaryResult,
-    IOnDemandSummarizeOptions,
-    IProvideSummarizer,
-    ISubmitSummaryOpResult,
-    ISubmitSummaryOptions,
-    ISummarizeOptions,
-    ISummarizeResults,
-    ISummarizer,
-    ISummarizerEvents,
-    ISummarizerInternalsProvider,
-    ISummarizerRuntime,
-    ISummarizingWarning,
-    ISummaryCancellationToken,
-    IUploadSummaryResult,
-    SubmitSummaryResult,
-    SummarizeResultPart,
-    SummarizerStopReason,
-} from "./summarizerTypes";
-export {
-    IAckedSummary,
-    IClientSummaryWatcher,
-    ISummary,
-    ISummaryCollectionOpEvents,
-    ISummaryAckMessage,
-    ISummaryNackMessage,
-    ISummaryOpMessage,
-    OpActionEventListener,
-    OpActionEventName,
-    SummaryCollection,
-} from "./summaryCollection";
-export { ICancellableSummarizerController, neverCancelledSummaryToken } from "./runWhileConnectedCoordinator";
+	/**
+	 * @deprecated Import from `@fluidframework/id-compressor` instead.
+	 */
+	assertIsStableId,
+	/**
+	 * @deprecated Import from `@fluidframework/id-compressor` instead.
+	 */
+	generateStableId,
+	/**
+	 * @deprecated Import from `@fluidframework/id-compressor` instead.
+	 */
+	isStableId,
+} from "@fluidframework/id-compressor";

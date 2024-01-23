@@ -3,9 +3,19 @@
  * Licensed under the MIT License.
  */
 
-export * from "./heap";
-export * from "./intervalTree";
-export * from "./list";
-export * from "./rbTree";
-export * from "./stack";
-export * from "./tst";
+export { DoublyLinkedList, ListNode, ListNodeRange, walkList } from "./list";
+export {
+	ConflictAction,
+	Dictionary,
+	IRBAugmentation,
+	IRBMatcher,
+	KeyComparer,
+	Property,
+	PropertyAction,
+	QProperty,
+	RBColor,
+	RBNode,
+	RBNodeActions,
+	RedBlackTree,
+	SortedDictionary,
+} from "./rbTree";

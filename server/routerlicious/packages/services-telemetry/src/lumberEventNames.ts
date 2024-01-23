@@ -5,31 +5,57 @@
 
 // List of event names that should identify Lumber events throughout the code.
 // Values in the enum must be strings.
+/**
+ * @internal
+ */
 export enum LumberEventName {
-    // Lumberjack infrastructure and helpers
-    LumberjackError = "LumberjackError",
-    LumberjackSchemaValidationFailure = "LumberjackSchemaValidationFailure",
+	// Lumberjack infrastructure and helpers
+	LumberjackError = "LumberjackError",
+	LumberjackSchemaValidationFailure = "LumberjackSchemaValidationFailure",
 
-    // Fluid server infrastructure
-    RunService = "RunService",
+	// Fluid server infrastructure
+	RunService = "RunService",
 
-    // Unit Testing
-    UnitTestEvent = "UnitTestEvent",
+	// Unit Testing
+	UnitTestEvent = "UnitTestEvent",
 
-    // Lambdas
-    ClientSummary = "ClientSummary",
-    DeliHandler = "DeliHandler",
-    KafkaRunner = "KafkaRunner",
-    ScribeHandler = "ScribeHandler",
-    ServiceSummary = "ServiceSummary",
-    SummaryReader = "SummaryReader",
+	// Lambdas
+	AlfredRunner = "AlfredRunner",
+	ClientSummary = "ClientSummary",
+	DeliHandler = "DeliHandler",
+	KafkaRunner = "KafkaRunner",
+	NexusRunner = "NexusRunner",
+	RiddlerRunner = "RiddlerRunner",
+	ScribeHandler = "ScribeHandler",
+	ServiceSummary = "ServiceSummary",
+	SummaryReader = "SummaryReader",
+	ScriptoriumProcessBatch = "ScriptoriumProcessBatch",
 
-    // Reliability
-    SessionResult = "SessionResult",
-    StartSessionResult = "StartSessionResult",
-    ScribeSessionResult = "ScribeSessionResult",
+	// Retries
+	RunWithRetry = "RunWithRetry",
+	RequestWithRetry = "RequestWithRetry",
 
-    // Miscellaneous
-    ConnectDocument = "ConnectDocument",
-    HttpRequest = "HttpRequest",
+	// Reliability
+	SessionResult = "SessionResult",
+	StartSessionResult = "StartSessionResult",
+	ScribeSessionResult = "ScribeSessionResult",
+
+	// Miscellaneous
+	ConnectDocument = "ConnectDocument",
+	ConnectDocumentAddClient = "ConnectDocumentAddClient",
+	ConnectDocumentGetClients = "ConnectDocumentGetClients",
+	ConnectDocumentOrdererConnection = "ConnectDocumentOrdererConnection",
+	CreateDocumentUpdateDocumentCollection = "CreateDocumentUpdateDocumentCollection",
+	CreateDocInitialSummaryWrite = "CreateDocInitialSummaryWrite",
+	DisconnectDocument = "DisconnectDocument",
+	DisconnectDocumentRetry = "DisconnectDocumentRetry",
+	RiddlerFetchTenantKey = "RiddlerFetchTenantKey",
+	HttpRequest = "HttpRequest",
+	SocketConnectionCount = "SocketConnectionCount",
+	TotalConnectionCount = "TotalConnectionCount",
+	ConnectionCountPerNode = "ConnectionCountPerNode",
+	RestoreFromCheckpoint = "RestoreFromCheckpoint",
+	GlobalCheckpointError = "GlobalCheckpointError",
+	ReprocessOps = "ReprocessOps",
+	MongoMonitoring = "MongoMonitoring",
 }

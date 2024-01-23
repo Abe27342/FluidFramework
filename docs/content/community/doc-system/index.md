@@ -33,8 +33,7 @@ Narrative documentation
 : The overall structure of the documentation comes from Markdown files in the `docs/` folder.
 
 Automated API documentation
-: The contents of the [API]({{< relref "/docs/apis/_index.md" >}}) section is built from [TSDoc
-comments](https://api-extractor.com/pages/tsdoc/doc_comment_syntax/) in the source code.
+: The contents of the `docs/api` section is built from [TSDoc comments](https://api-extractor.com/pages/tsdoc/doc_comment_syntax/) in the source code.
 
 ## Features
 
@@ -192,6 +191,8 @@ Mermaid diagrams can be put inline in a Markdown file using a code block with th
 
 **Input**
 
+
+<!-- markdownlint-disable-next-line MD048 -->
 ~~~markdown
 ```mermaid
 classDiagram
@@ -246,6 +247,7 @@ Some simple samples are included below. See
 
 **Input**
 
+<!-- markdownlint-disable-next-line MD048 -->
 ~~~markdown
 ```goat
 +-------------------+    +---------------------+
@@ -274,6 +276,7 @@ Some simple samples are included below. See
 
 **Input**
 
+<!-- markdownlint-disable-next-line MD048 -->
 ~~~markdown
 ```goat
           .               .                .               .--- 1          .-- 1     / 1

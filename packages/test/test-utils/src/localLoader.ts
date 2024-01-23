@@ -4,16 +4,15 @@
  */
 
 import {
-    ICodeDetailsLoader,
-    IContainer,
-    IHostLoader,
-    ILoaderOptions,
-    IFluidCodeDetails,
+	ICodeDetailsLoader,
+	IContainer,
+	IHostLoader,
+	ILoaderOptions,
+	IFluidCodeDetails,
 } from "@fluidframework/container-definitions";
 import { Loader } from "@fluidframework/container-loader";
-import { IRequest } from "@fluidframework/core-interfaces";
+import { ITelemetryBaseLogger, IRequest } from "@fluidframework/core-interfaces";
 import { IDocumentServiceFactory, IUrlResolver } from "@fluidframework/driver-definitions";
-import { ITelemetryBaseLogger } from "@fluidframework/common-definitions";
 import { fluidEntryPoint, LocalCodeLoader } from "./localCodeLoader";
 
 /**
@@ -22,23 +21,24 @@ import { fluidEntryPoint, LocalCodeLoader } from "./localCodeLoader";
  * @param documentServiceFactory - the driver factory to use
  * @param urlResolver - the url resolver to use
  * @param options - loader options
+ * @internal
  */
 export function createLoader(
-    packageEntries: Iterable<[IFluidCodeDetails, fluidEntryPoint]>,
-    documentServiceFactory: IDocumentServiceFactory,
-    urlResolver: IUrlResolver,
-    logger?: ITelemetryBaseLogger,
-    options?: ILoaderOptions,
+	packageEntries: Iterable<[IFluidCodeDetails, fluidEntryPoint]>,
+	documentServiceFactory: IDocumentServiceFactory,
+	urlResolver: IUrlResolver,
+	logger?: ITelemetryBaseLogger,
+	options?: ILoaderOptions,
 ): IHostLoader {
-    const codeLoader: ICodeDetailsLoader = new LocalCodeLoader(packageEntries);
+	const codeLoader: ICodeDetailsLoader = new LocalCodeLoader(packageEntries);
 
-    return new Loader({
-        urlResolver,
-        documentServiceFactory,
-        codeLoader,
-        logger,
-        options,
-    });
+	return new Loader({
+		urlResolver,
+		documentServiceFactory,
+		codeLoader,
+		logger,
+		options,
+	});
 }
 
 /**
@@ -46,15 +46,16 @@ export function createLoader(
  * @param source - The code details used to create the Container.
  * @param loader - The loader to use to initialize the container.
  * @param attachRequest - The request to create new from.
+ * @alpha
  */
 
 export async function createAndAttachContainer(
-    source: IFluidCodeDetails,
-    loader: IHostLoader,
-    attachRequest: IRequest,
+	source: IFluidCodeDetails,
+	loader: IHostLoader,
+	attachRequest: IRequest,
 ): Promise<IContainer> {
-    const container = await loader.createDetachedContainer(source);
-    await container.attach(attachRequest);
+	const container = await loader.createDetachedContainer(source);
+	await container.attach(attachRequest);
 
-    return container;
+	return container;
 }

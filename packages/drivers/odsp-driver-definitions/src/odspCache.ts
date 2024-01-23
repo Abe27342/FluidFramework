@@ -3,12 +3,16 @@
  * Licensed under the MIT License.
  */
 
-import { IFluidResolvedUrl } from "@fluidframework/driver-definitions";
+import { IResolvedUrl } from "@fluidframework/driver-definitions";
 
 /**
  * Describes what kind of content is stored in cache entry.
+ * @internal
  */
 export const snapshotKey = "snapshot";
+/**
+ * @alpha
+ */
 export type CacheContentType = "snapshot" | "ops";
 
 /*
@@ -16,51 +20,56 @@ export type CacheContentType = "snapshot" | "ops";
  * There is overlapping information here - host can use all of it or parts
  * to implement storage / identify files.
  */
-export interface IFileEntry {
-    /**
-     * Unique and stable ID of the document.
-     * Driver guarantees that docId is stable ID uniquely identifying document.
-     */
-    docId: string;
-    /**
-     * Resolved URI is provided for additional versatility - host can use it to
-     * identify file in storage, and (as example) delete all cached entries for
-     * a file if user requests so.
-     * This is IOdspResolvedUrl in case of ODSP driver.
-     */
-    resolvedUrl: IFluidResolvedUrl;
-}
-
 /**
- * Cache entry. Identifies file that this entry belongs to, and type of content stored in it.
+ * @alpha
  */
- export interface IEntry {
-    /**
-     * Identifies type of entry for a given file.
-     * Each file can have multiple types of entries associated with it.
-     * For example, it can be snapshot, blob, ops, etc.
-     */
-    type: CacheContentType;
-
-    /**
-     * Identifies individual entry for a given file and type.
-     * Each file can have multiple cache entries associated with it.
-     * This property identifies a particular instance of entry.
-     * For example, for blobs it will be unique ID of the blob in a file.
-     * For batch of ops, it can be starting op sequence number.
-     * For types that have only one entry (like snapshots), it will be empty string.
-     */
-    key: string;
+export interface IFileEntry {
+	/**
+	 * Unique and stable ID of the document.
+	 * Driver guarantees that docId is stable ID uniquely identifying document.
+	 */
+	docId: string;
+	/**
+	 * Resolved URI is provided for additional versatility - host can use it to
+	 * identify file in storage, and (as example) delete all cached entries for
+	 * a file if user requests so.
+	 * This is IOdspResolvedUrl in case of ODSP driver.
+	 */
+	resolvedUrl: IResolvedUrl;
 }
 
 /**
  * Cache entry. Identifies file that this entry belongs to, and type of content stored in it.
+ * @alpha
+ */
+export interface IEntry {
+	/**
+	 * Identifies type of entry for a given file.
+	 * Each file can have multiple types of entries associated with it.
+	 * For example, it can be snapshot, blob, ops, etc.
+	 */
+	type: CacheContentType;
+
+	/**
+	 * Identifies individual entry for a given file and type.
+	 * Each file can have multiple cache entries associated with it.
+	 * This property identifies a particular instance of entry.
+	 * For example, for blobs it will be unique ID of the blob in a file.
+	 * For batch of ops, it can be starting op sequence number.
+	 * For types that have only one entry (like snapshots), it will be empty string.
+	 */
+	key: string;
+}
+
+/**
+ * Cache entry. Identifies file that this entry belongs to, and type of content stored in it.
+ * @alpha
  */
 export interface ICacheEntry extends IEntry {
-    /**
-     * Identifies file in storage this cached entry is for
-     */
-    file: IFileEntry;
+	/**
+	 * Identifies file in storage this cached entry is for
+	 */
+	file: IFileEntry;
 }
 
 /**
@@ -69,26 +78,37 @@ export interface ICacheEntry extends IEntry {
  * cache implementation that does not survive across sessions. Snapshot entires stored in the
  * IPersistedCache will be considered stale and removed after 2 days. Read the README for more
  * information.
+ * @alpha
  */
 export interface IPersistedCache {
-    /**
-     * Get the cache value of the key
-     * @param entry - cache entry, identifies file and particular key for this file.
-     * @returns Cached value. undefined if nothing is cached.
-    */
-    get(entry: ICacheEntry): Promise<any>;
+	/**
+	 * Get the cache value of the key
+	 * @param entry - cache entry, identifies file and particular key for this file.
+	 * @returns Cached value. undefined if nothing is cached.
+	 */
+	get(entry: ICacheEntry): Promise<any>;
 
-    /**
-     * Put the value into cache.
-     * Important - only serializable content is allowed since this cache may be persisted between sessions
-     * @param entry - cache entry.
-     * @param value - JSON-serializable content.
-     */
-    put(entry: ICacheEntry, value: any): Promise<void>;
+	/**
+	 * Put the value into cache.
+	 * Important - only serializable content is allowed since this cache may be persisted between sessions
+	 * @param entry - cache entry.
+	 * @param value - JSON-serializable content.
+	 */
+	put(entry: ICacheEntry, value: any): Promise<void>;
 
-    /**
-     * Removes the entries from the cache for given parametres.
-     * @param file - file entry to be deleted.
-     */
-    removeEntries(file: IFileEntry): Promise<void>;
+	/**
+	 * Removes the entries from the cache for given parametres.
+	 * @param file - file entry to be deleted.
+	 */
+	removeEntries(file: IFileEntry): Promise<void>;
+}
+
+/**
+ * Api to generate a cache key from cache entry.
+ * @param entry - cache entry from which a cache key is generated
+ * @returns The key for cache.
+ * @internal
+ */
+export function getKeyForCacheEntry(entry: ICacheEntry): string {
+	return `${entry.file.docId}_${entry.type}_${entry.key}`;
 }

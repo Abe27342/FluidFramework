@@ -3,29 +3,32 @@
  * Licensed under the MIT License.
  */
 
-export { bumpDependencies, cleanPrereleaseDependencies } from "./bumpVersion/bumpDependencies";
+export { Context } from "./common/context";
+export { GitRepo } from "./common/gitRepo";
 export {
-    bumpRepo
-} from "./bumpVersion/bumpVersion";
-export { Context } from "./bumpVersion/context";
-export { createReleaseBump } from "./bumpVersion/createReleaseBump";
-export { GitRepo } from "./bumpVersion/gitRepo";
-export { releaseVersion } from "./bumpVersion/releaseVersion";
-export { exec, execNoError } from "./bumpVersion/utils";
-export { VersionBag } from "./bumpVersion/versionBag";
-export { FluidRepo } from "./common/fluidRepo";
-export { getResolvedFluidRoot } from "./common/fluidUtils";
-export { Logger, LoggingFunction } from "./common/logging";
+	type BrokenCompatTypes,
+	type ITypeValidationConfig,
+	FluidRepo,
+	type VersionDetails,
+} from "./common/fluidRepo";
+export { getResolvedFluidRoot, getFluidBuildConfig } from "./common/fluidUtils";
+export type { Logger, ErrorLoggingFunction, LoggingFunction } from "./common/logging";
+export { isMonoRepoKind, MonoRepo, MonoRepoKind, supportedMonoRepoValues } from "./common/monoRepo";
 export {
-    isMonoRepoKind,
-    MonoRepo,
-    MonoRepoKind,
-    supportedMonoRepoValues
-} from "./common/monoRepo";
-export {
-    Package
+	Package,
+	type PackageJson,
+	type FluidPackageJson,
+	updatePackageJsonFile,
 } from "./common/npmPackage";
-export { generateMonoRepoInstallPackageJson } from "./genMonoRepoPackageJson/genMonoRepoPackageJson";
-export { LayerGraph } from "./layerCheck/layerGraph";
 export { Timer } from "./common/timer";
-export { execAsync, execWithErrorAsync, readJsonAsync, readFileAsync, writeFileAsync } from "./common/utils";
+export { VersionBag } from "./common/versionBag";
+export { LayerGraph } from "./layerCheck/layerGraph";
+export { type Handler } from "./repoPolicyCheck/common";
+export { policyHandlers } from "./repoPolicyCheck/handlers";
+export type {
+	IFluidBuildConfig,
+	IFluidRepoPackage,
+	PackageNamePolicyConfig,
+	PolicyConfig,
+	PreviousVersionStyle,
+} from "./common/fluidRepo";

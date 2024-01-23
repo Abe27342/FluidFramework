@@ -3,16 +3,126 @@
  * Licensed under the MIT License.
  */
 
-/**
- * This module contains miscellaneous typescript utilities.
- * To be here these utilities must meet the following requirements:
- * - Not be logically specific to anything in this package.
- * - Could be factored out into its own Package.
- * - Is not currently worth factoring out into a separate package.
- * - Is not needed by users outside this package except to consume this package.
- */
+export {
+	brand,
+	Brand,
+	BrandedType,
+	brandOpaque,
+	brandedNumberType,
+	brandedStringType,
+	extractFromOpaque,
+	ExtractFromOpaque,
+	fromErased,
+	Erased,
+	ErasedType,
+	NameFromBranded,
+	Opaque,
+	ValueFromBranded,
+	brandErased,
+} from "./brand.js";
+export {
+	deleteFromNestedMap,
+	getOrAddInMap,
+	getOrAddInNestedMap,
+	getOrDefaultInNestedMap,
+	forEachInNestedMap,
+	NestedMap,
+	SizedNestedMap,
+	populateNestedMap,
+	setInNestedMap,
+	tryAddToNestedMap,
+	tryGetFromNestedMap,
+	nestedMapToFlatList,
+	nestedMapFromFlatList,
+} from "./nestedMap.js";
+export { addToNestedSet, NestedSet, nestedSetContains } from "./nestedSet.js";
+export { OffsetList, OffsetListFactory } from "./offsetList.js";
+export { TransactionResult } from "./transactionResult.js";
+export {
+	areSafelyAssignable,
+	Contravariant,
+	Covariant,
+	eitherIsAny,
+	EnforceTypeCheckTests,
+	Invariant,
+	isAny,
+	isAssignableTo,
+	isStrictSubset,
+	MakeNominal,
+	requireFalse,
+	requireTrue,
+	requireAssignableTo,
+} from "./typeCheck.js";
+export { StackyIterator } from "./stackyIterator.js";
+export {
+	asMutable,
+	clone,
+	compareSets,
+	fail,
+	getOrAddEmptyToMap,
+	getOrCreate,
+	isJsonObject,
+	isReadonlyArray,
+	JsonCompatible,
+	JsonCompatibleObject,
+	JsonCompatibleReadOnly,
+	JsonCompatibleReadOnlySchema,
+	makeArray,
+	mapIterable,
+	Mutable,
+	Populated,
+	RecursiveReadonly,
+	zipIterables,
+	Assume,
+	assertValidIndex,
+	assertValidRange,
+	assertNonNegativeSafeInteger,
+	objectToMap,
+	invertMap,
+	oneFromSet,
+	Named,
+	compareNamed,
+	disposeSymbol,
+	IDisposable,
+	capitalize,
+	assertValidRangeIndices,
+	transformObjectMap,
+	compareStrings,
+} from "./utils.js";
+export { ReferenceCountedBase, ReferenceCounted } from "./referenceCounting.js";
 
-export * from "./utils";
-export * from "./typeCheck";
-export * from "./brand";
-export * from "./offsetList";
+export {
+	AllowOptional,
+	RequiredFields,
+	OptionalFields,
+	_InlineTrick,
+	_RecursiveTrick,
+	FlattenKeys,
+	AllowOptionalNotFlattened,
+	RestrictiveReadonlyRecord,
+} from "./typeUtils.js";
+
+export {
+	BrandedKey,
+	BrandedKeyContent,
+	BrandedMapSubset,
+	getOrCreateSlotContent,
+	brandedSlot,
+} from "./brandedMap.js";
+
+export {
+	getFirstEntryFromRangeMap,
+	getFromRangeMap,
+	RangeEntry,
+	RangeMap,
+	RangeQueryResult,
+	setInRangeMap,
+} from "./rangeMap.js";
+
+export {
+	IdAllocator,
+	idAllocatorFromMaxId,
+	idAllocatorFromState,
+	IdAllocationState,
+	fakeIdAllocator,
+} from "./idAllocator.js";

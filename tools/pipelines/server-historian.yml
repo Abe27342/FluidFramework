@@ -31,6 +31,10 @@ parameters:
     - default
     - skip
     - force
+- name: buildToolsVersionToInstall
+  displayName: Fluid build tools version (default = installs version in repo)
+  type: string
+  default: repo
 
 trigger:
   branches:
@@ -40,12 +44,14 @@ trigger:
     - lts
   paths:
     include:
+    - .prettierignore
+    - fluidBuild.config.cjs
     - server/historian
     - tools/pipelines/server-historian.yml
-    - tools/pipelines/scripts/build-version.js
     - tools/pipelines/templates/build-docker-service.yml
     - tools/pipelines/templates/include-set-package-version.yml
     - tools/pipelines/templates/include-vars.yml
+    - tools/pipelines/templates/include-install-pnpm.yml
     - tools/pipelines/templates/include-generate-notice-steps.yml
     - tools/pipelines/templates/include-publish-npm-package.yml
     - tools/pipelines/templates/include-publish-npm-package-deployment.yml
@@ -53,6 +59,7 @@ trigger:
     - tools/pipelines/templates/include-publish-docker-service.yml
     - tools/pipelines/templates/include-publish-docker-service-steps.yml
     - tools/pipelines/templates/include-git-tag-steps.yml
+    - tools/pipelines/templates/include-use-node-version.yml
 
 pr:
   branches:
@@ -63,12 +70,15 @@ pr:
     - release/*
   paths:
     include:
+    - .prettierignore
+    - fluidBuild.config.cjs
     - server/historian
     - tools/pipelines/server-historian.yml
-    - tools/pipelines/scripts/build-version.js
     - tools/pipelines/templates/build-docker-service.yml
     - tools/pipelines/templates/include-set-package-version.yml
     - tools/pipelines/templates/include-vars.yml
+    - tools/pipelines/templates/include-install-pnpm.yml
+    - tools/pipelines/templates/include-use-node-version.yml
 
 extends:
   template: templates/build-docker-service.yml
@@ -77,8 +87,16 @@ extends:
     publishOverride: ${{ parameters.publishOverride }}
     releaseBuildOverride: ${{ parameters.releaseBuildOverride }}
     releaseKind: ${{ parameters.releaseKind }}
+    buildToolsVersionToInstall: ${{ parameters.buildToolsVersionToInstall }}
     buildDirectory: server/historian
     containerName: fluidframework/routerlicious/historian
+    # We need to install only the root dependencies; historian has native deps that don't install in CI since we use
+    # Docker to do the actual build in CI. We need the root dependencies so setting package versions works.
+    packageManagerInstallCommand: 'pnpm install --workspace-root --frozen-lockfile'
+    packageManager: pnpm
     test: test
     tagName: historian
+    lint: true
     pack: true
+    checks:
+    - prettier

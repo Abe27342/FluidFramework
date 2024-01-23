@@ -5,98 +5,196 @@
 
 import { strict as assert } from "assert";
 import { TrackingGroup } from "../mergeTreeTracking";
+import { ReferenceType } from "../ops";
 import { TestClient } from "./testClient";
 
 describe("MergeTree.tracking", () => {
-    let testClient: TestClient;
+	let testClient: TestClient;
 
-    beforeEach(() => {
-        testClient = new TestClient();
-        testClient.startOrUpdateCollaboration("me");
-    });
+	beforeEach(() => {
+		testClient = new TestClient();
+		testClient.startOrUpdateCollaboration("me");
+	});
 
-    it("Inserted segment should have empty tracking groups",
-        () => {
-            testClient.insertTextLocal(0, "abc");
+	it("Inserted segment should have empty tracking groups", () => {
+		testClient.insertTextLocal(0, "abc");
 
-            assert.equal(testClient.getLength(), 3);
+		assert.equal(testClient.getLength(), 3);
 
-            const segmentInfo = testClient.getContainingSegment(0);
+		const segmentInfo = testClient.getContainingSegment(0);
 
-            assert(segmentInfo?.segment?.trackingCollection.empty);
-        });
+		assert(segmentInfo?.segment?.trackingCollection.empty);
+	});
 
-    it("Insert single segment with single tracking group",
-        () => {
-            const trackingGroup = new TrackingGroup();
+	it("Insert single segment with single tracking group", () => {
+		const trackingGroup = new TrackingGroup();
 
-            testClient.mergeTree.mergeTreeDeltaCallback =
-                (opArgs, deltaArgs) => {
-                    deltaArgs.deltaSegments.forEach((sg) => sg.segment.trackingCollection.link(trackingGroup));
-                };
+		testClient.on("delta", (opArgs, deltaArgs) => {
+			deltaArgs.deltaSegments.forEach((sg) =>
+				sg.segment.trackingCollection.link(trackingGroup),
+			);
+		});
 
-            testClient.insertTextLocal(0, "abc");
+		testClient.insertTextLocal(0, "abc");
 
-            assert.equal(trackingGroup.size, 1);
+		assert.equal(trackingGroup.size, 1);
 
-            const segmentInfo = testClient.getContainingSegment(0);
+		const segmentInfo = testClient.getContainingSegment(0);
 
-            assert.equal(segmentInfo?.segment?.trackingCollection.trackingGroups.size, 1);
-        });
+		assert.equal(segmentInfo?.segment?.trackingCollection.trackingGroups.size, 1);
 
-    it("Splitting segment should split tracking group",
-        () => {
-            const trackingGroup = new TrackingGroup();
+		assert(trackingGroup.unlink(segmentInfo.segment), "unlink segment should be true");
 
-            testClient.mergeTree.mergeTreeDeltaCallback =
-                (opArgs, deltaArgs) => {
-                    deltaArgs.deltaSegments.forEach((sg) => sg.segment.trackingCollection.link(trackingGroup));
-                };
+		assert.equal(segmentInfo?.segment?.trackingCollection.trackingGroups.size, 0);
+	});
 
-            const ops = [testClient.insertTextLocal(0, "abc")];
+	it("Splitting segment should split tracking group", () => {
+		const trackingGroup = new TrackingGroup();
 
-            testClient.mergeTree.mergeTreeDeltaCallback = undefined;
-            assert.equal(trackingGroup.size, 1);
+		testClient.on("delta", (opArgs, deltaArgs) => {
+			deltaArgs.deltaSegments.forEach((sg) =>
+				sg.segment.trackingCollection.link(trackingGroup),
+			);
+		});
 
-            ops.push(testClient.insertTextLocal(1, "z"));
-            assert.equal(testClient.getLength(), 4);
+		const ops = [testClient.insertTextLocal(0, "abc")];
 
-            assert.equal(trackingGroup.size, 2);
-            const segmentInfo = testClient.getContainingSegment(0);
-            assert.equal(segmentInfo?.segment?.trackingCollection.trackingGroups.size, 1);
-        });
+		testClient.removeAllListeners("delta");
+		assert.equal(trackingGroup.size, 1);
 
-    it("Zamboni should merge matching tracking groups",
-        () => {
-            const trackingGroup = new TrackingGroup();
+		ops.push(testClient.insertTextLocal(1, "z"));
+		assert.equal(testClient.getLength(), 4);
 
-            testClient.mergeTree.mergeTreeDeltaCallback =
-                (opArgs, deltaArgs) => {
-                    deltaArgs.deltaSegments.forEach((sg) => sg.segment.trackingCollection.link(trackingGroup));
-                };
+		assert.equal(trackingGroup.size, 2);
+		const segmentInfo = testClient.getContainingSegment(0);
+		assert.equal(segmentInfo?.segment?.trackingCollection.trackingGroups.size, 1);
+	});
 
-            const ops = [testClient.insertTextLocal(0, "abc")];
+	it("Zamboni should merge matching tracking groups", () => {
+		const trackingGroup = new TrackingGroup();
 
-            assert.equal(trackingGroup.size, 1);
+		testClient.on("delta", (opArgs, deltaArgs) => {
+			deltaArgs.deltaSegments.forEach((sg) =>
+				sg.segment.trackingCollection.link(trackingGroup),
+			);
+		});
 
-            ops.push(testClient.insertTextLocal(1, "z"));
-            assert.equal(testClient.getLength(), 4);
+		const ops = [testClient.insertTextLocal(0, "abc")];
 
-            assert.equal(trackingGroup.size, 3);
-            let segmentInfo = testClient.getContainingSegment(0);
-            assert.equal(segmentInfo?.segment?.trackingCollection.trackingGroups.size, 1);
+		assert.equal(trackingGroup.size, 1);
 
-            let seq = 1;
-            ops.forEach((op) => testClient.applyMsg(testClient.makeOpMessage(op, ++seq)));
+		ops.push(testClient.insertTextLocal(1, "z"));
+		assert.equal(testClient.getLength(), 4);
 
-            assert.equal(trackingGroup.size, 3);
-            segmentInfo = testClient.getContainingSegment(0);
-            assert.equal(segmentInfo?.segment?.trackingCollection.trackingGroups.size, 1);
+		assert.equal(trackingGroup.size, 3);
+		let segmentInfo = testClient.getContainingSegment(0);
+		assert.equal(segmentInfo?.segment?.trackingCollection.trackingGroups.size, 1);
 
-            testClient.updateMinSeq(seq);
+		let seq = 1;
+		ops.forEach((op) => testClient.applyMsg(testClient.makeOpMessage(op, ++seq)));
 
-            assert.equal(trackingGroup.size, 1);
-            segmentInfo = testClient.getContainingSegment(0);
-            assert.equal(segmentInfo?.segment?.trackingCollection.trackingGroups.size, 1);
-        });
+		assert.equal(trackingGroup.size, 3);
+		segmentInfo = testClient.getContainingSegment(0);
+		assert.equal(segmentInfo?.segment?.trackingCollection.trackingGroups.size, 1);
+
+		testClient.updateMinSeq(seq);
+
+		assert.equal(trackingGroup.size, 1);
+		segmentInfo = testClient.getContainingSegment(0);
+		assert.equal(segmentInfo?.segment?.trackingCollection.trackingGroups.size, 1);
+	});
+
+	it("Newly created local reference should have empty tracking group", () => {
+		testClient.insertTextLocal(0, "abc");
+
+		assert.equal(testClient.getLength(), 3);
+
+		const segmentInfo = testClient.getContainingSegment(0);
+		assert(segmentInfo.segment);
+		const ref = testClient.createLocalReferencePosition(
+			segmentInfo.segment,
+			0,
+			ReferenceType.SlideOnRemove,
+			undefined,
+		);
+
+		assert(ref.trackingCollection.empty);
+	});
+
+	it("Local reference can be added an removed from tracking group", () => {
+		testClient.insertTextLocal(0, "abc");
+
+		assert.equal(testClient.getLength(), 3);
+
+		const segmentInfo = testClient.getContainingSegment(0);
+		assert(segmentInfo.segment);
+		const ref = testClient.createLocalReferencePosition(
+			segmentInfo.segment,
+			0,
+			ReferenceType.SlideOnRemove,
+			undefined,
+		);
+
+		const trackingGroup = new TrackingGroup();
+
+		ref.trackingCollection.link(trackingGroup);
+
+		assert.equal(trackingGroup.size, 1);
+		assert.equal(trackingGroup.has(ref), true);
+		assert.equal(trackingGroup.tracked.includes(ref), true);
+		assert.equal(ref.trackingCollection.trackingGroups.size, 1);
+
+		ref.trackingCollection.unlink(trackingGroup);
+
+		assert.equal(trackingGroup.size, 0);
+		assert.equal(trackingGroup.has(ref), false);
+		assert.equal(trackingGroup.tracked.includes(ref), false);
+		assert.equal(ref.trackingCollection.trackingGroups.size, 0);
+	});
+
+	it("unlink segment from tracking group", () => {
+		const trackingGroup = new TrackingGroup();
+
+		testClient.insertTextLocal(0, "abc");
+
+		const { segment } = testClient.getContainingSegment(0);
+		segment?.trackingCollection.link(trackingGroup);
+
+		assert.equal(segment?.trackingCollection.trackingGroups.size, 1);
+
+		assert(trackingGroup.unlink(segment), "unlink segment should be true");
+
+		assert.equal(segment?.trackingCollection.trackingGroups.size, 0);
+
+		assert.equal(trackingGroup.unlink(segment), false, "repeat unlink segment should be false");
+		assert.equal(
+			segment.trackingCollection.unlink(trackingGroup),
+			false,
+			"repeat unlink trackingGroup should be false",
+		);
+	});
+
+	it("unlink tracking group from collection", () => {
+		const trackingGroup = new TrackingGroup();
+
+		testClient.insertTextLocal(0, "abc");
+
+		const { segment } = testClient.getContainingSegment(0);
+		segment?.trackingCollection.link(trackingGroup);
+
+		assert.equal(segment?.trackingCollection.trackingGroups.size, 1);
+
+		assert(
+			segment.trackingCollection.unlink(trackingGroup),
+			"unlink trackingGroup should be true",
+		);
+
+		assert.equal(segment?.trackingCollection.trackingGroups.size, 0);
+		assert.equal(trackingGroup.unlink(segment), false, "repeat unlink segment should be false");
+		assert.equal(
+			segment.trackingCollection.unlink(trackingGroup),
+			false,
+			"repeat unlink trackingGroup should be false",
+		);
+	});
 });

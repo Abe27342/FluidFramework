@@ -4,21 +4,14 @@
 # include-publish-npm-package-deployment
 
 parameters:
-- name: namespace
-  type: boolean
+- name: feedKind
+  type: string
 
-- name: official
-  type: boolean
-
-- name: feedName
+- name: feedUrl
   type: string
 
 - name: environment
   type: string
-
-- name: publishNonScopedPackages
-  type: boolean
-  default: false
 
 - name: pool
   type: object
@@ -52,27 +45,14 @@ jobs:
           steps:
           - download: current
             artifact: pack
-          - task: UseNode@1
-            displayName: Use Node 14.x
-            inputs:
-              version: 14.x
+          - template: include-use-node-version.yml
           - template: include-publish-npm-package-steps.yml
             parameters:
-              namespace: ${{ parameters.namespace }}
               artifactPath: scoped
-              feedName: ${{ parameters.feedName }}
+              feedUrl: ${{ parameters.feedUrl }}
               customEndPoint: ${{ parameters.customEndPoint }}
-              official: ${{ parameters.official }}
+              feedKind: ${{ parameters.feedKind }}
               publishFlags: ${{ parameters.publishFlags }}
-          - ${{ if eq(parameters.publishNonScopedPackages, true) }}:
-            - template: include-publish-npm-package-steps.yml
-              parameters:
-                namespace: false
-                artifactPath: non-scoped
-                feedName: ${{ parameters.feedName }}
-                official: ${{ parameters.official }}
-                customEndPoint: ${{ parameters.customEndPoint }}
-                publishFlags: ${{ parameters.publishFlags }}
           - template: include-git-tag-steps.yml
             parameters:
               tagName: ${{ parameters.tagName }}
