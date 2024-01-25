@@ -7,7 +7,7 @@ import { strict as assert } from "node:assert";
 
 import { type IFluidHandle } from "@fluidframework/core-interfaces";
 import { UsageError } from "@fluidframework/telemetry-utils";
-import { ISummaryBlob, SummaryType } from "@fluidframework/protocol-definitions";
+import { ISummaryBlob, ISummaryTree, SummaryType } from "@fluidframework/protocol-definitions";
 import { IGCTestProvider, runGCTests } from "@fluid-private/test-dds-utils";
 import {
 	MockFluidDataStoreRuntime,
@@ -64,6 +64,37 @@ function serialize(directory1: SharedDirectory): string {
 }
 
 describe("Directory", () => {
+	it("regression for 0x85c", async () => {
+		const runtimeFactory = new MockContainerRuntimeFactory();
+		const dataStoreRuntime = new MockFluidDataStoreRuntime();
+		runtimeFactory.createContainerRuntime(dataStoreRuntime);
+		const factory = SharedDirectory.getFactory();
+
+		const summaryContent =
+			'{"blobs":[],"content":{"ci":{"csn":0,"ccIds":[]},"subdirectories":{"detached1":{"ci":{"csn":0,"ccIds":["97cd0b77-34b1-46a8-bbe2-5fbefb3e014b"]}},"detached2":{"ci":{"csn":0,"ccIds":["97cd0b77-34b1-46a8-bbe2-5fbefb3e014b"]}},"detached3":{"ci":{"csn":-1,"ccIds":["97cd0b77-34b1-46a8-bbe2-5fbefb3e014b"]}}}}}';
+		const summary: ISummaryTree = {
+			type: 1,
+			tree: {
+				header: {
+					type: 2,
+					content: summaryContent,
+				},
+			},
+		};
+
+		const directory = await factory.load(
+			dataStoreRuntime,
+			"A",
+			{
+				deltaConnection: dataStoreRuntime.createDeltaConnection(),
+				objectStorage: MockStorage.createFromSummary(summary),
+			},
+			factory.attributes,
+		);
+
+		await directory.summarize();
+	});
+
 	describe("Local state", () => {
 		let directory: SharedDirectory;
 		let dataStoreRuntime: MockFluidDataStoreRuntime;
