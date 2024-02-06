@@ -3,6 +3,7 @@
  * Licensed under the MIT License.
  */
 
+import registerDebug from "debug";
 import Deque from "double-ended-queue";
 import { assert, Deferred } from "@fluidframework/core-utils";
 import { bufferToString } from "@fluid-internal/client-utils";
@@ -65,6 +66,8 @@ import { ISharedIntervalCollection } from "./sharedIntervalCollection";
 
 const snapshotFileName = "header";
 const contentPath = "content";
+
+const debug = registerDebug("fluid:refSeqTracking");
 
 /**
  * Events emitted in response to changes to the sequence data.
@@ -244,7 +247,7 @@ export abstract class SharedSegmentSequence<T extends ISegment>
 	 * DDS submits over the wire. See `inFlightRefSeqs` for more details.
 	 */
 	private get currentRefSeq() {
-		return this.ongoingResubmitRefSeq ?? this.runtime.deltaManager.lastSequenceNumber;
+		return this.runtime.deltaManager.lastSequenceNumber;
 	}
 
 	// eslint-disable-next-line import/no-deprecated
@@ -472,6 +475,7 @@ export abstract class SharedSegmentSequence<T extends ISegment>
 			return;
 		}
 
+		debug(`submitSequenceMessage with refSeq: ${this.currentRefSeq}`);
 		this.inFlightRefSeqs.push(this.currentRefSeq);
 		const translated = makeHandlesSerializable(message, this.serializer, this.handle);
 		const metadata = this.client.peekPendingSegmentGroups(
@@ -736,6 +740,11 @@ export abstract class SharedSegmentSequence<T extends ISegment>
 	) {
 		if (local) {
 			const recordedRefSeq = this.inFlightRefSeqs.shift();
+			debug(
+				`processCore with refSeq: ${recordedRefSeq}, refSeq on message: ${
+					message.referenceSequenceNumber
+				}, refSeq matched: ${recordedRefSeq === message.referenceSequenceNumber}`,
+			);
 			assert(recordedRefSeq !== undefined, "No pending recorded refSeq found");
 			// TODO: AB#7076: Some equivalent assert should be enabled. This fails some e2e stashed op tests because
 			// the deltaManager may have seen more messages than the runtime has processed while amidst the stashed op
@@ -743,7 +752,7 @@ export abstract class SharedSegmentSequence<T extends ISegment>
 			// one of its messages, the delta manager has actually already seen subsequent messages from collaborators
 			// which the in-flight message is concurrent to.
 			// See "handles stashed ops created on top of sequenced local ops" for one such test case.
-			// assert(recordedRefSeq <= message.referenceSequenceNumber, "RefSeq mismatch");
+			assert(recordedRefSeq == message.referenceSequenceNumber, "RefSeq mismatch");
 		}
 
 		// if loading isn't complete, we need to cache all

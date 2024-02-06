@@ -21,7 +21,7 @@ import { describeCompat } from "@fluid-private/test-version-utils";
 
 const stringId = "sharedStringKey";
 
-describeCompat("SharedString", "FullCompat", (getTestObjectProvider, apis) => {
+describeCompat.only("SharedString", "FullCompat", (getTestObjectProvider, apis) => {
 	const { SharedString } = apis.dds;
 
 	const registry: ChannelFactoryRegistry = [[stringId, SharedString.getFactory()]];

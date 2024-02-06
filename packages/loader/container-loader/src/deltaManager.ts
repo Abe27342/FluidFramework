@@ -3,6 +3,9 @@
  * Licensed under the MIT License.
  */
 
+// Note: since the problematic tests repro using LTS loader layer, to generate the
+// same output log you'll need to add similar debug() statement to the JS under test-version-utils/node_modules/.legacy/1.3.7.
+import registerDebug from "debug";
 import { v4 as uuid } from "uuid";
 import {
 	IThrottlingWarning,
@@ -52,6 +55,8 @@ import {
 } from "./contracts";
 import { DeltaQueue } from "./deltaQueue";
 import { ThrottlingWarning } from "./error";
+
+const debug = registerDebug("fluid:refSeqTracking");
 
 export interface IConnectionArgs {
 	mode?: ConnectionMode;
@@ -317,6 +322,7 @@ export class DeltaManager<TConnectionManager extends IConnectionManager>
 			this.noOpCount++;
 		}
 
+		debug(`Submitting: ${JSON.stringify(message)}`);
 		this.emit("submitOp", message);
 
 		if (!batch) {
@@ -986,6 +992,7 @@ export class DeltaManager<TConnectionManager extends IConnectionManager>
 	}
 
 	private processInboundMessage(message: ISequencedDocumentMessage): void {
+		debug(`Processing inbound message: ${JSON.stringify(message)}`);
 		const startTime = Date.now();
 		assert(!this.currentlyProcessingOps, 0x3af /* Already processing ops. */);
 		this.currentlyProcessingOps = true;
