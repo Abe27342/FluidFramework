@@ -307,16 +307,12 @@ export function findRootMergeBlock(
  * @internal
  */
 function getSlideToSegment(
-	segment: ISegment | undefined,
+	segment: ISegment,
 	slidingPreference: SlidingPreference = SlidingPreference.FORWARD,
 	cache?: Map<ISegment, { seg?: ISegment }>,
 	useNewSlidingBehavior: boolean = false,
 ): [ISegment | undefined, "start" | "end" | undefined] {
-	if (
-		!segment ||
-		!isRemovedAndAckedOrMovedAndAcked(segment) ||
-		segment.endpointType !== undefined
-	) {
+	if (segment.endpointType !== undefined) {
 		return [segment, undefined];
 	}
 
@@ -366,15 +362,8 @@ function getSlideToSegment(
 		}
 	}
 
-	let maybeEndpoint: "start" | "end" | undefined;
-
-	if (slidingPreference === SlidingPreference.BACKWARD) {
-		maybeEndpoint = "start";
-	} else if (slidingPreference === SlidingPreference.FORWARD) {
-		maybeEndpoint = "end";
-	}
-
-	return [result.seg, maybeEndpoint];
+	const endpoint = slidingPreference === SlidingPreference.BACKWARD ? "start" : "end";
+	return [result.seg, endpoint];
 }
 
 /**
@@ -391,12 +380,16 @@ export function getSlideToSegoff(
 	if (segoff.segment === undefined) {
 		return segoff;
 	}
-	const [segment, _] = getSlideToSegment(
-		segoff.segment,
-		slidingPreference,
-		undefined,
-		useNewSlidingBehavior,
-	);
+
+	let segment: ISegment | undefined = segoff.segment;
+	if (isRemovedAndAckedOrMovedAndAcked(segoff.segment)) {
+		segment = getSlideToSegment(
+			segoff.segment,
+			slidingPreference,
+			undefined,
+			useNewSlidingBehavior,
+		)[0];
+	}
 	if (segment === segoff.segment) {
 		return segoff;
 	}
