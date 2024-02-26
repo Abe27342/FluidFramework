@@ -161,6 +161,41 @@ export function backwardExcursion(
 	);
 }
 
+export function findFurtherSegmentSatisfying(
+	startNode: IMergeNode,
+	leafPredicate: (seg: ISegment) => boolean,
+): ISegment | undefined {
+	return findSegmentSatisfying(startNode, leafPredicate, true);
+}
+
+export function findNearerSegmentSatisfying(
+	startNode: IMergeNode,
+	leafPredicate: (seg: ISegment) => boolean,
+): ISegment | undefined {
+	return findSegmentSatisfying(startNode, leafPredicate, false);
+}
+
+function findSegmentSatisfying(
+	startNode: IMergeNode,
+	leafPredicate: (seg: ISegment) => boolean,
+	isForward: boolean,
+): ISegment | undefined {
+	let result: ISegment | undefined;
+	const leafAction = (seg: ISegment) => {
+		if (leafPredicate(seg)) {
+			result = seg;
+			return false;
+		}
+		return true;
+	};
+	if (isForward) {
+		forwardExcursion(startNode, leafAction);
+	} else {
+		backwardExcursion(startNode, leafAction);
+	}
+	return result;
+}
+
 /**
  * Walks all segments below the specific start block
  * @param startBlock - The block to start the walk at

@@ -70,6 +70,8 @@ import { PropertiesRollback } from "./segmentPropertiesManager";
 import {
 	backwardExcursion,
 	depthFirstNodeWalk,
+	findFurtherSegmentSatisfying,
+	findNearerSegmentSatisfying,
 	forwardExcursion,
 	NodeAction,
 	walkAllChildSegments,
@@ -295,75 +297,52 @@ export function findRootMergeBlock(
 	return maybeRoot?.mergeTree !== undefined ? maybeRoot : undefined;
 }
 
+const preferredExcursion = {
+	[SlidingPreference.BACKWARD]: findNearerSegmentSatisfying,
+	[SlidingPreference.FORWARD]: findFurtherSegmentSatisfying,
+};
+
+const secondaryExcursion = {
+	[SlidingPreference.BACKWARD]: findFurtherSegmentSatisfying,
+	[SlidingPreference.FORWARD]: findNearerSegmentSatisfying,
+};
+
 /**
- * @param segment - The segment to slide from.
- * @param cache - Optional cache mapping segments to their sliding destinations.
- * Excursions will be avoided for segments in the cache, and the cache will be populated with
- * entries for all segments visited during excursion.
- * This can reduce the number of times the tree needs to be scanned if a range containing many
- * SlideOnRemove references is removed.
- * @returns The segment a SlideOnRemove reference should slide to, or undefined if there is no
- * valid segment (i.e. the tree is empty).
- * @internal
+ * Finds the nearest segment satisfying the given predicate.
  */
-function getSlideToSegment(
+function getNearestSegment(
 	segment: ISegment,
-	slidingPreference: SlidingPreference = SlidingPreference.FORWARD,
-	cache?: Map<ISegment, { seg?: ISegment }>,
-	useNewSlidingBehavior: boolean = false,
+	leafPredicate: (segment: ISegment) => boolean,
+	direction: SlidingPreference,
+	useNewEndpointBehavior: boolean,
 ): [ISegment | undefined, "start" | "end" | undefined] {
 	if (segment.endpointType !== undefined) {
 		return [segment, undefined];
 	}
 
-	const cachedSegment = cache?.get(segment);
-	if (cachedSegment !== undefined) {
-		return [cachedSegment.seg, undefined];
-	}
-	const result: { seg?: ISegment } = {};
-	cache?.set(segment, result);
-	const goFurtherToFindSlideToSegment = (seg: ISegment) => {
-		if (seg.seq !== UnassignedSequenceNumber && !isRemovedAndAckedOrMovedAndAcked(seg)) {
-			result.seg = seg;
-			return false;
-		}
-		if (
-			cache !== undefined &&
-			(seg.removedSeq === segment.removedSeq || seg.movedSeq === segment.movedSeq)
-		) {
-			cache.set(seg, result);
-		}
-		return true;
-	};
-
-	if (slidingPreference === SlidingPreference.BACKWARD) {
-		backwardExcursion(segment, goFurtherToFindSlideToSegment);
-	} else {
-		forwardExcursion(segment, goFurtherToFindSlideToSegment);
-	}
-	if (result.seg !== undefined) {
-		return [result.seg, undefined];
+	let result = preferredExcursion[direction](segment, leafPredicate);
+	if (result !== undefined) {
+		return [result, undefined];
 	}
 
-	// in the new sliding behavior, we don't look in the opposite direction
-	// if we fail to find a segment to slide to in the right direction.
+	// in the new endpoint behavior, we don't look in the opposite direction
+	// if we fail to find a segment in the right direction.
 	//
 	// in other words, rather than going `forward ?? backward ?? detached` (or
 	// `backward ?? forward ?? detached`), we would slide `forward ?? detached`
 	// or `backward ?? detached`
 	//
 	// in both of these cases detached may be substituted for one of the special
-	// endpoint segments, if such behavior is enabled
-	if (!useNewSlidingBehavior) {
-		if (slidingPreference === SlidingPreference.BACKWARD) {
-			forwardExcursion(segment, goFurtherToFindSlideToSegment);
-		} else {
-			backwardExcursion(segment, goFurtherToFindSlideToSegment);
+	// endpoint segments, if such behavior is enabled.
+	if (!useNewEndpointBehavior) {
+		result = secondaryExcursion[direction](segment, leafPredicate);
+		if (result !== undefined) {
+			return [result, undefined];
 		}
 	}
 
-	const endpoint = slidingPreference === SlidingPreference.BACKWARD ? "start" : "end";
-	return [result.seg, endpoint];
+	const endpoint = direction === SlidingPreference.BACKWARD ? "start" : "end";
+	return [result, endpoint];
 }
 
 /**
@@ -377,22 +356,17 @@ export function getSlideToSegoff(
 	slidingPreference: SlidingPreference = SlidingPreference.FORWARD,
 	useNewSlidingBehavior: boolean = false,
 ) {
-	if (segoff.segment === undefined) {
+	if (segoff.segment === undefined || !isRemovedAndAckedOrMovedAndAcked(segoff.segment)) {
 		return segoff;
 	}
 
-	let segment: ISegment | undefined = segoff.segment;
-	if (isRemovedAndAckedOrMovedAndAcked(segoff.segment)) {
-		segment = getSlideToSegment(
-			segoff.segment,
-			slidingPreference,
-			undefined,
-			useNewSlidingBehavior,
-		)[0];
-	}
-	if (segment === segoff.segment) {
-		return segoff;
-	}
+	const [segment, _] = getNearestSegment(
+		segoff.segment,
+		(seg) => seg.seq !== UnassignedSequenceNumber && !isRemovedAndAckedOrMovedAndAcked(seg),
+		slidingPreference,
+		useNewSlidingBehavior,
+	);
+
 	const offset =
 		segment && segment.ordinal < segoff.segment.ordinal ? segment.cachedLength - 1 : 0;
 	return {
@@ -822,14 +796,37 @@ export class MergeTree {
 				return;
 			}
 
-			const [slideToSegment, maybeEndpoint] = getSlideToSegment(
-				segment,
-				slidingPreference,
+			// See comment on declaration of these caches for more information, the usage is a bit tricky.
+			const cache =
 				slidingPreference === SlidingPreference.FORWARD
 					? forwardSegmentCache
-					: backwardSegmentCache,
-				this.options?.mergeTreeReferencesCanSlideToEndpoint,
-			);
+					: backwardSegmentCache;
+
+			const cacheEntry = cache.get(segment);
+			const result: { seg?: ISegment } = {};
+
+			const [slideToSegment, maybeEndpoint] =
+				cacheEntry !== undefined
+					? [cacheEntry.seg, undefined]
+					: getNearestSegment(
+							segment,
+							(seg) => {
+								// TODO: Old version of the code had this conditionally set when (seg.removedSeq === segment.removedSeq || seg.movedSeq === segment.movedSeq)
+								// but that doesn't seem necessary anymore. Investigate history here.
+								cache.set(seg, result);
+								if (
+									seg.seq !== UnassignedSequenceNumber &&
+									!isRemovedAndAckedOrMovedAndAcked(seg)
+								) {
+									result.seg = seg;
+									return true;
+								}
+								return false;
+							},
+							slidingPreference,
+							this.options?.mergeTreeReferencesCanSlideToEndpoint ?? false,
+					  );
+
 			const slideIsForward =
 				slideToSegment === undefined ? false : slideToSegment.ordinal > segment.ordinal;
 
@@ -856,6 +853,13 @@ export class MergeTree {
 			}
 		};
 
+		// These caches map removed segments to the segment any references on them should slide to.
+		// Ex: in a tree with segments [A, B, C, D], if B and C were removed, forwardSegmentCache might contain entries
+		// [B -> { seg: D }] and [C -> { seg: D }] and backwardSegmentCache might contain entries [C -> { seg: A }] and [B -> { seg: A }].
+		// The caches are populated lazily on first traversal, and then used to avoid re-traversing the tree when multiple references
+		// in a removed range slide to the same segment.
+		// This optimization is only valid because if a reference on segment A slides to segment B, then references on any segment
+		// traversed while finding segment B will also slide to segment B.
 		const forwardSegmentCache = new Map<ISegment, { seg?: ISegment }>();
 		const backwardSegmentCache = new Map<ISegment, { seg?: ISegment }>();
 		for (const segment of segments) {
@@ -1058,31 +1062,57 @@ export class MergeTree {
 			return this.getPosition(refPos, refSeq, clientId);
 		}
 		if (refTypeIncludesFlag(refPos, ReferenceType.Transient) || seg.localRefs?.has(refPos)) {
-			if (
-				(isRemoved(seg) || isMoved(seg)) &&
-				refPos.slidingPreference === SlidingPreference.BACKWARD
-			) {
-				let slidToSegment: ISegment | undefined;
+			const isValidSegment = (seg: ISegment) => !isRemoved(seg) && !isMoved(seg);
+			if (!isValidSegment(seg)) {
+				// This code would be able to make use of the new slide computation, but there are more semantic issues.
+				if (false as boolean) {
+					const [slidToSegment, endpoint] = getNearestSegment(
+						seg,
+						isValidSegment,
+						refPos.slidingPreference ?? SlidingPreference.FORWARD,
+						this.options?.mergeTreeReferencesCanSlideToEndpoint ?? false,
+					);
 
-				backwardExcursion(seg, (segment) => {
-					if (!isRemoved(segment) && !isMoved(segment)) {
-						slidToSegment = segment;
-						return false;
+					if (slidToSegment) {
+						const off =
+							slidToSegment.ordinal < seg.ordinal
+								? slidToSegment.cachedLength - 1
+								: 0;
+						return off + this.getPosition(slidToSegment, refSeq, clientId);
 					}
-					return true;
-				});
 
-				if (slidToSegment) {
-					const off =
-						slidToSegment.ordinal < seg.ordinal ? slidToSegment.cachedLength - 1 : 0;
-					return off + this.getPosition(slidToSegment, refSeq, clientId);
+					if (endpoint === undefined) {
+						return DetachedReferencePosition;
+					} else if (endpoint === "start") {
+						return 0;
+					} else {
+						return this.getLength(refSeq, clientId);
+					}
+				} else if (refPos.slidingPreference === SlidingPreference.BACKWARD) {
+					let slidToSegment: ISegment | undefined;
+
+					backwardExcursion(seg, (segment) => {
+						if (!isRemoved(segment) && !isMoved(segment)) {
+							slidToSegment = segment;
+							return false;
+						}
+						return true;
+					});
+
+					if (slidToSegment) {
+						const off =
+							slidToSegment.ordinal < seg.ordinal
+								? slidToSegment.cachedLength - 1
+								: 0;
+						return off + this.getPosition(slidToSegment, refSeq, clientId);
+					}
+
+					return 0;
 				}
-
-				return 0;
 			}
 
 			const offset = isRemoved(seg) || isMoved(seg) ? 0 : refPos.getOffset();
-			return offset + this.getPosition(seg, refSeq, clientId);
+			return this.getPosition(seg, refSeq, clientId) + offset;
 		}
 		return DetachedReferencePosition;
 	}
