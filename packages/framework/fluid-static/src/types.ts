@@ -8,7 +8,7 @@ import {
 	type IEventProvider,
 	type IFluidLoadable,
 } from "@fluidframework/core-interfaces";
-import { type IChannelFactory } from "@fluidframework/datastore-definitions";
+import { type IChannel, type IChannelFactory } from "@fluidframework/datastore-definitions";
 
 /**
  * A mapping of string identifiers to instantiated `DataObject`s or `SharedObject`s.
@@ -37,7 +37,7 @@ export type LoadableObjectClassRecord = Record<string, LoadableObjectClass<any>>
  * In this case placing SharedObjectClass fixed one usage and didn't break anything, and generally seems more likely to work than the reverse, so this is the order being used.
  */
 export type LoadableObjectClass<T extends IFluidLoadable> =
-	| SharedObjectClass<T>
+	| (T extends IChannel ? SharedObjectClass<T> : never)
 	| DataObjectClass<T>;
 
 /**
@@ -58,8 +58,8 @@ export type DataObjectClass<T extends IFluidLoadable> = {
  * @typeParam T - The class of the `SharedObject`.
  * @public
  */
-export type SharedObjectClass<T extends IFluidLoadable> = {
-	readonly getFactory: () => IChannelFactory;
+export type SharedObjectClass<T extends IChannel> = {
+	readonly getFactory: () => IChannelFactory<T>;
 } & LoadableObjectCtor<T>;
 
 /**
