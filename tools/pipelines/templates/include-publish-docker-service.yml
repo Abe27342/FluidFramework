@@ -4,8 +4,6 @@
 # include-publish-docker-service
 
 parameters:
-- name: containerRegistry
-  type: string
 - name: containerTag
   type: string
 - name: containerRegistryUrl
@@ -25,7 +23,6 @@ stages:
   - template: /tools/pipelines/templates/include-publish-docker-service-steps.yml@self
     parameters:
       environment: container-registry-public
-      containerRegistry: ${{ parameters.containerRegistry }}
       containerTag: ${{ parameters.containerTag }}
       containerRegistryUrl: ${{ parameters.containerRegistryUrl }}
       containerName: public/${{ parameters.containerName }}

@@ -103,6 +103,14 @@ parameters:
     type: boolean
     default: false
 
+  # The container registry URL to publish docker images to.
+  # To use a non-default value, a managed identity must be set up on CI agent pools with permissions to push to this registry.
+  # Note: 1ES templates validate this registry value at compile-time, so normal runtime macro-expansion syntax $() with variables
+  # (rather than a parameter) doesn't work.
+  - name: containerRegistryUrl
+    type: string
+    default: fluidcr.azurecr.io
+
 trigger: none
 
 resources:
@@ -240,7 +248,6 @@ extends:
                 baseContainerTag=$(baseContainerTag)
                 buildContainerName=$(buildContainerName)
                 canRelease=$(canRelease)
-                containerRegistryConnection=$(containerRegistryConnection)
                 containerRegistryUrl=$(containerRegistryUrl)
                 containerTag=$(containerTag)
                 containerTagSuffix=$(containerTagSuffix)
@@ -522,10 +529,9 @@ extends:
         templateContext:
           ${{ if eq(parameters.shouldPushDockerImage, true) }}:
             authenticatedContainerRegistries:
-            # $(containerRegistryConnection) comes from the container-registry-info variable group and needs to be
-            # specified as a runtime variable (variables from variable groups apparently are never available "statically"
-            # at parse/compile time, so can't be used with template-expression syntax ( '${{ }}' )).
-            - serviceConnection: $(containerRegistryConnection)
+            - registry: ${{ parameters.containerRegistryUrl }}
+              tenant: Microsoft
+              identity: ManagedIdentity
           outputParentDirectory: $(Build.ArtifactStagingDirectory)
           outputs:
           - ${{ if eq(parameters.pack, true) }}:
@@ -552,8 +558,7 @@ extends:
     - ${{ if eq(parameters.shouldReleaseDockerImage, true) }}:
       - template: /tools/pipelines/templates/include-publish-docker-service.yml@self
         parameters:
-          containerRegistry: $(containerRegistryConnection)
           containerTag: $(containerTag)
-          containerRegistryUrl: $(containerRegistryUrl)
+          containerRegistryUrl: ${{ parameters.containerRegistryUrl }}
           containerName: ${{ parameters.containerName }}
           tagName: $(tagNameOnReleaseImage)

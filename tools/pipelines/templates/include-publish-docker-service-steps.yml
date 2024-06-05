@@ -11,9 +11,6 @@ parameters:
   type: object
   default: Small-1ES
 
-- name: containerRegistry
-  type: string
-
 - name: containerTag
   type: string
 
@@ -77,7 +74,6 @@ jobs:
   # the stage defined in this file ends up being passed to a 1ES template which provides this functionality.
   templateContext:
     authenticatedContainerRegistries:
-    # $(containerRegistryConnection) comes from the container-registry-info variable group and needs to be
-    # specified as a runtime variable (variables from variable groups apparently are never available "statically"
-    # at parse/compile time, so can't be used with template-expression syntax ( '${{ }}' )).
-    - serviceConnection: $(containerRegistryConnection)
+    - registry: ${{ parameters.containerRegistryUrl }}
+      tenant: Microsoft
+      identity: ManagedIdentity
