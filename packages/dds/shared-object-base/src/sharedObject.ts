@@ -586,7 +586,7 @@ export abstract class SharedObjectCore<TEvent extends ISharedObjectEvents = ISha
 	 */
 	public emit(event: EventEmitterEventType, ...args: any[]): boolean {
 		return this.callbacksHelper.measure(() => {
-			return super.emit(event, ...args);
+			return { ret: super.emit(event, ...args), telemetryProperties: {} };
 		});
 	}
 
