@@ -70,6 +70,43 @@ interface LoggerData {
 	dataMaxes: Record<string, number>;
 }
 
+export interface ITelemetryEventMetrics<TCustomMetrics extends Record<string, number>> {
+	incrementMetric(bag: Partial<TCustomMetrics>): void;
+}
+
+export class TelemetryEventMetrics<TCustomMetrics extends Record<string, number>> {
+	private constructor(private readonly metrics: TCustomMetrics) {}
+
+	public static start<TCustomMetrics extends Record<string, number>>(
+		defaults: TCustomMetrics,
+	): TelemetryEventMetrics<TCustomMetrics> {
+		return new TelemetryEventMetrics<TCustomMetrics>(defaults);
+	}
+
+	public incrementMetric(bag: Partial<TCustomMetrics>): void {
+		for (const [key, value] of Object.entries(bag)) {
+			// note could assert that the metrics exist already if we want.
+			(this.metrics as Record<string, number>)[key] = (this.metrics[key] ?? 0) + value;
+		}
+	}
+
+	public end(): TCustomMetrics {
+		return this.metrics;
+	}
+}
+
+// Sample usage:
+// interface RebaseTelemetry {
+// 	rebaseCount: number;
+// 	srcBranchLen: number;
+// }
+
+// const myHelper = new SampledTelemetryHelper<RebaseTelemetry>();
+
+// myHelper.measure((event) => {
+// 	rebaseSeriesOfBranches(a, b, c, event);
+// });
+
 /**
  * Helper class that executes a specified code block and writes an
  * {@link @fluidframework/core-interfaces#ITelemetryPerformanceEvent} to a specified logger every time a specified
@@ -108,6 +145,7 @@ export class SampledTelemetryHelper<
 	 * ignored.
 	 */
 	public constructor(
+		private readonly customMetricsDefaults: TCustomMetrics,
 		private readonly eventBase: ITelemetryGenericEventExt,
 		private readonly logger: ITelemetryLoggerExt,
 		private readonly sampleThreshold: number,
@@ -126,28 +164,13 @@ export class SampledTelemetryHelper<
 	 * @returns Whatever the passed-in code block returns.
 	 */
 	public measure<T>(
-		codeToMeasure: () => { ret: T; telemetryProperties: TCustomMetrics },
+		codeToMeasure: (event: ITelemetryEventMetrics<TCustomMetrics>) => T,
 		bucket: string = "",
 	): T {
+		const event = TelemetryEventMetrics.start({ ...this.customMetricsDefaults });
 		const start = performance.now();
-		const returnValue = codeToMeasure();
-		// This bit preserves compatibility with the old signature of `measure`, which could happen for some
-		// rare cross-package scenarios
-		let ret: T;
-		let telemetryProperties: TCustomMetrics;
-		if (
-			typeof returnValue === "object" &&
-			returnValue !== null &&
-			"ret" in returnValue &&
-			"telemetryProperties" in returnValue
-		) {
-			ret = returnValue.ret;
-			telemetryProperties = returnValue.telemetryProperties;
-		} else {
-			ret = returnValue;
-			telemetryProperties = {} as unknown as TCustomMetrics;
-		}
-		//
+		const returnValue = codeToMeasure(event);
+		const telemetryProperties = event.end();
 		const duration = performance.now() - start;
 
 		const loggerData = this.accumulateCustomData(telemetryProperties, bucket);
@@ -167,7 +190,7 @@ export class SampledTelemetryHelper<
 			this.flushBucket(bucket);
 		}
 
-		return ret;
+		return returnValue;
 	}
 
 	/**
