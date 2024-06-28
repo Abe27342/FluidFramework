@@ -9,7 +9,6 @@ export {
 	IOdspTokenManagerCacheKey,
 	OdspTokenConfig,
 	OdspTokenManager,
-	odspTokensCache,
 } from "./odspTokenManager.js";
 export {
 	gcBlobPrefix,

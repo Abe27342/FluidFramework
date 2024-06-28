@@ -11214,6 +11214,8 @@ importers:
 
   packages/tools/fetch-tool:
     specifiers:
+      '@azure/identity': ^4.2.0
+      '@azure/identity-cache-persistence': ^1.1.0
       '@biomejs/biome': ^1.6.2
       '@fluid-internal/client-utils': workspace:~
       '@fluid-tools/build-cli': ^0.39.0-264124
@@ -11242,6 +11244,8 @@ importers:
       rimraf: ^4.4.0
       typescript: ~5.3.3
     dependencies:
+      '@azure/identity': 4.2.0
+      '@azure/identity-cache-persistence': 1.1.0
       '@fluid-internal/client-utils': link:../../common/client-utils
       '@fluidframework/container-runtime': link:../../runtime/container-runtime
       '@fluidframework/core-interfaces': link:../../common/core-interfaces
@@ -11566,6 +11570,8 @@ importers:
   packages/utils/tool-utils:
     specifiers:
       '@arethetypeswrong/cli': ^0.15.2
+      '@azure/identity': ^4.2.0
+      '@azure/identity-cache-persistence': ^1.1.0
       '@biomejs/biome': ^1.6.2
       '@fluid-internal/mocha-test-setup': workspace:~
       '@fluid-tools/build-cli': ^0.39.0-264124
@@ -11597,6 +11603,8 @@ importers:
       rimraf: ^4.4.0
       typescript: ~5.3.3
     dependencies:
+      '@azure/identity': 4.2.0
+      '@azure/identity-cache-persistence': 1.1.0
       '@fluidframework/core-utils': link:../../common/core-utils
       '@fluidframework/driver-utils': link:../../loader/driver-utils
       '@fluidframework/odsp-doclib-utils': link:../odsp-doclib-utils
@@ -12431,13 +12439,35 @@ packages:
       tslib: 2.6.2
     dev: false
 
+  /@azure/abort-controller/2.1.2:
+    resolution: {integrity: sha512-nBrLsEWm4J2u5LpAPjxADTlq3trDgVZZXHNKabeXZtpq3d3AbN/KGO82R87rdDz5/lYB024rtEf10/q0urNgsA==}
+    engines: {node: '>=18.0.0'}
+    dependencies:
+      tslib: 2.6.2
+    dev: false
+
   /@azure/core-auth/1.5.0:
     resolution: {integrity: sha512-udzoBuYG1VBoHVohDTrvKjyzel34zt77Bhp7dQntVGGD0ehVq48owENbBG8fIgkHRNUBQH5k1r0hpoMu5L8+kw==}
     engines: {node: '>=14.0.0'}
     dependencies:
       '@azure/abort-controller': 1.1.0
-      '@azure/core-util': 1.2.0
+      '@azure/core-util': 1.9.0
       tslib: 2.6.2
+    dev: false
+
+  /@azure/core-client/1.9.2:
+    resolution: {integrity: sha512-kRdry/rav3fUKHl/aDLd/pDLcB+4pOFwPPTVEExuMyaI5r+JBbMWqRbCY1pn5BniDaU3lRxO9eaQ1AmSMehl/w==}
+    engines: {node: '>=18.0.0'}
+    dependencies:
+      '@azure/abort-controller': 2.1.2
+      '@azure/core-auth': 1.5.0
+      '@azure/core-rest-pipeline': 1.10.1
+      '@azure/core-tracing': 1.0.1
+      '@azure/core-util': 1.9.0
+      '@azure/logger': 1.0.4
+      tslib: 2.6.2
+    transitivePeerDependencies:
+      - supports-color
     dev: false
 
   /@azure/core-rest-pipeline/1.10.1:
@@ -12447,7 +12477,7 @@ packages:
       '@azure/abort-controller': 1.1.0
       '@azure/core-auth': 1.5.0
       '@azure/core-tracing': 1.0.1
-      '@azure/core-util': 1.2.0
+      '@azure/core-util': 1.9.0
       '@azure/logger': 1.0.4
       form-data: 4.0.0
       http-proxy-agent: 5.0.0
@@ -12473,6 +12503,50 @@ packages:
       tslib: 2.6.2
     dev: false
 
+  /@azure/core-util/1.9.0:
+    resolution: {integrity: sha512-AfalUQ1ZppaKuxPPMsFEUdX6GZPB3d9paR9d/TTL7Ow2De8cJaC7ibi7kWVlFAVPCYo31OcnGymc0R89DX8Oaw==}
+    engines: {node: '>=18.0.0'}
+    dependencies:
+      '@azure/abort-controller': 2.1.2
+      tslib: 2.6.2
+    dev: false
+
+  /@azure/identity-cache-persistence/1.1.0:
+    resolution: {integrity: sha512-uhLqCf38wxk/iYpo28J+8K2ujxgy1c1W3jFD8HWQn2osslpODsZI3tBYuKXOJMPO/8TRbtR2Us8SsiL8R9AsSQ==}
+    engines: {node: '>=18.0.0'}
+    dependencies:
+      '@azure/core-auth': 1.5.0
+      '@azure/identity': 4.2.0
+      '@azure/msal-node': 2.8.1
+      '@azure/msal-node-extensions': 1.0.16
+      keytar: 7.9.0
+      tslib: 2.6.2
+    transitivePeerDependencies:
+      - supports-color
+    dev: false
+
+  /@azure/identity/4.2.0:
+    resolution: {integrity: sha512-ve3aYv79qXOJ8wRxQ5jO0eIz2DZ4o0TyME4m4vlGV5YyePddVZ+pFMzusAMODNAflYAAv1cBIhKnd4xytmXyig==}
+    engines: {node: '>=18.0.0'}
+    dependencies:
+      '@azure/abort-controller': 1.1.0
+      '@azure/core-auth': 1.5.0
+      '@azure/core-client': 1.9.2
+      '@azure/core-rest-pipeline': 1.10.1
+      '@azure/core-tracing': 1.0.1
+      '@azure/core-util': 1.9.0
+      '@azure/logger': 1.0.4
+      '@azure/msal-browser': 3.14.0
+      '@azure/msal-node': 2.8.1
+      events: 3.3.0
+      jws: 4.0.0
+      open: 8.4.2
+      stoppable: 1.1.0
+      tslib: 2.6.2
+    transitivePeerDependencies:
+      - supports-color
+    dev: false
+
   /@azure/logger/1.0.4:
     resolution: {integrity: sha512-ustrPY8MryhloQj7OWGe+HrYx+aoiOxzbXTtgblbV3xwCqpzUK36phH3XNHQKj3EPonyFUuDTfR3qFhTEAuZEg==}
     engines: {node: '>=14.0.0'}
@@ -12488,9 +12562,45 @@ packages:
       '@azure/msal-common': 13.3.1
     dev: false
 
+  /@azure/msal-browser/3.14.0:
+    resolution: {integrity: sha512-Un85LhOoecJ3HDTS3Uv3UWnXC9/43ZSO+Kc+anSqpZvcEt58SiO/3DuVCAe1A3I5UIBYJNMgTmZPGXQ0MVYrwA==}
+    engines: {node: '>=0.8.0'}
+    dependencies:
+      '@azure/msal-common': 14.10.0
+    dev: false
+
   /@azure/msal-common/13.3.1:
     resolution: {integrity: sha512-Lrk1ozoAtaP/cp53May3v6HtcFSVxdFrg2Pa/1xu5oIvsIwhxW6zSPibKefCOVgd5osgykMi5jjcZHv8XkzZEQ==}
     engines: {node: '>=0.8.0'}
+    dev: false
+
+  /@azure/msal-common/14.10.0:
+    resolution: {integrity: sha512-Zk6DPDz7e1wPgLoLgAp0349Yay9RvcjPM5We/ehuenDNsz/t9QEFI7tRoHpp/e47I4p20XE3FiDlhKwAo3utDA==}
+    engines: {node: '>=0.8.0'}
+    dev: false
+
+  /@azure/msal-node-extensions/1.0.16:
+    resolution: {integrity: sha512-zAK38Zdrlyrzii+AAMonQnmSzxV7Ues7gJTJ+LnVQ/sCrZ9t2NCsi+7ZvHGNZd5U4ZYBEhYg8BoGXqEGLt4wpA==}
+    engines: {node: '>=16'}
+    requiresBuild: true
+    dependencies:
+      '@azure/msal-common': 14.10.0
+      '@azure/msal-node-runtime': 0.13.6-alpha.0
+      keytar: 7.9.0
+    dev: false
+
+  /@azure/msal-node-runtime/0.13.6-alpha.0:
+    resolution: {integrity: sha512-Tu5e4wBFiaiBLrOu7bsJF7FYknFH9XIOvUyCqCnmLJFMMOUnYULZ7fOFYuintFFcNPMOT2u8BVfSCPxETri5ng==}
+    requiresBuild: true
+    dev: false
+
+  /@azure/msal-node/2.8.1:
+    resolution: {integrity: sha512-VcZZM+5VvCWRBTOF7SxMKaxrz+EXjntx2u5AQe7QE06e6FuPJElGBrImgNgCh5QmFaNCfVFO+3qNR7UoFD/Gfw==}
+    engines: {node: '>=16'}
+    dependencies:
+      '@azure/msal-common': 14.10.0
+      jsonwebtoken: 9.0.2
+      uuid: 8.3.2
     dev: false
 
   /@azure/opentelemetry-instrumentation-azure-sdk/1.0.0-beta.5:
@@ -17159,7 +17269,7 @@ packages:
       '@fluidframework/core-utils': 2.0.0-rc.4.0.0
       '@fluidframework/driver-definitions': 2.0.0-rc.4.0.0
       '@fluidframework/driver-utils': 2.0.0-rc.4.0.0_debug@4.3.4
-      '@fluidframework/protocol-base': 4.0.0
+      '@fluidframework/protocol-base': 4.0.1
       '@fluidframework/protocol-definitions': 3.2.0
       '@fluidframework/telemetry-utils': 2.0.0-rc.4.0.0
       '@ungap/structured-clone': 1.2.0
@@ -17529,8 +17639,8 @@ packages:
       '@fluidframework/core-interfaces': 2.0.0-rc.4.0.0
       '@fluidframework/core-utils': 2.0.0-rc.4.0.0
       '@fluidframework/driver-definitions': 2.0.0-rc.4.0.0
-      '@fluidframework/gitresources': 4.0.0
-      '@fluidframework/protocol-base': 4.0.0
+      '@fluidframework/gitresources': 4.0.1
+      '@fluidframework/protocol-base': 4.0.1
       '@fluidframework/protocol-definitions': 3.2.0
       '@fluidframework/telemetry-utils': 2.0.0-rc.4.0.0
       axios: 1.6.2
@@ -17548,8 +17658,8 @@ packages:
       '@fluidframework/core-interfaces': 2.0.0-rc.4.0.0
       '@fluidframework/core-utils': 2.0.0-rc.4.0.0
       '@fluidframework/driver-definitions': 2.0.0-rc.4.0.0
-      '@fluidframework/gitresources': 4.0.0
-      '@fluidframework/protocol-base': 4.0.0
+      '@fluidframework/gitresources': 4.0.1
+      '@fluidframework/protocol-base': 4.0.1
       '@fluidframework/protocol-definitions': 3.2.0
       '@fluidframework/telemetry-utils': 2.0.0-rc.4.0.0
       axios: 1.6.2_debug@4.3.4
@@ -17720,13 +17830,13 @@ packages:
       '@fluidframework/driver-base': 2.0.0-rc.4.0.0
       '@fluidframework/driver-definitions': 2.0.0-rc.4.0.0
       '@fluidframework/driver-utils': 2.0.0-rc.4.0.0
-      '@fluidframework/protocol-base': 4.0.0
+      '@fluidframework/protocol-base': 4.0.1
       '@fluidframework/protocol-definitions': 3.2.0
       '@fluidframework/routerlicious-driver': 2.0.0-rc.4.0.0
-      '@fluidframework/server-local-server': 4.0.0
-      '@fluidframework/server-services-client': 4.0.0
-      '@fluidframework/server-services-core': 4.0.0
-      '@fluidframework/server-test-utils': 4.0.0
+      '@fluidframework/server-local-server': 4.0.1
+      '@fluidframework/server-services-client': 4.0.1
+      '@fluidframework/server-services-core': 4.0.1
+      '@fluidframework/server-test-utils': 4.0.1
       '@fluidframework/telemetry-utils': 2.0.0-rc.4.0.0
       jsrsasign: 11.1.0
       uuid: 9.0.1
@@ -17747,13 +17857,13 @@ packages:
       '@fluidframework/driver-base': 2.0.0-rc.4.0.0_debug@4.3.4
       '@fluidframework/driver-definitions': 2.0.0-rc.4.0.0
       '@fluidframework/driver-utils': 2.0.0-rc.4.0.0_debug@4.3.4
-      '@fluidframework/protocol-base': 4.0.0
+      '@fluidframework/protocol-base': 4.0.1
       '@fluidframework/protocol-definitions': 3.2.0
       '@fluidframework/routerlicious-driver': 2.0.0-rc.4.0.0_debug@4.3.4
-      '@fluidframework/server-local-server': 4.0.0
-      '@fluidframework/server-services-client': 4.0.0
-      '@fluidframework/server-services-core': 4.0.0
-      '@fluidframework/server-test-utils': 4.0.0
+      '@fluidframework/server-local-server': 4.0.1
+      '@fluidframework/server-services-client': 4.0.1
+      '@fluidframework/server-services-core': 4.0.1
+      '@fluidframework/server-test-utils': 4.0.1
       '@fluidframework/telemetry-utils': 2.0.0-rc.4.0.0
       jsrsasign: 11.1.0
       uuid: 9.0.1
@@ -17933,7 +18043,7 @@ packages:
       '@fluidframework/driver-utils': 2.0.0-rc.4.0.0
       '@fluidframework/odsp-doclib-utils': 2.0.0-rc.4.0.0
       '@fluidframework/odsp-driver-definitions': 2.0.0-rc.4.0.0
-      '@fluidframework/protocol-base': 4.0.0
+      '@fluidframework/protocol-base': 4.0.1
       '@fluidframework/protocol-definitions': 3.2.0
       '@fluidframework/telemetry-utils': 2.0.0-rc.4.0.0
       node-fetch: 2.7.0
@@ -18127,10 +18237,10 @@ packages:
       '@fluidframework/driver-base': 2.0.0-rc.4.0.0
       '@fluidframework/driver-definitions': 2.0.0-rc.4.0.0
       '@fluidframework/driver-utils': 2.0.0-rc.4.0.0
-      '@fluidframework/gitresources': 4.0.0
-      '@fluidframework/protocol-base': 4.0.0
+      '@fluidframework/gitresources': 4.0.1
+      '@fluidframework/protocol-base': 4.0.1
       '@fluidframework/protocol-definitions': 3.2.0
-      '@fluidframework/server-services-client': 4.0.0
+      '@fluidframework/server-services-client': 4.0.1
       '@fluidframework/telemetry-utils': 2.0.0-rc.4.0.0
       cross-fetch: 3.1.8
       json-stringify-safe: 5.0.1
@@ -18153,10 +18263,10 @@ packages:
       '@fluidframework/driver-base': 2.0.0-rc.4.0.0_debug@4.3.4
       '@fluidframework/driver-definitions': 2.0.0-rc.4.0.0
       '@fluidframework/driver-utils': 2.0.0-rc.4.0.0_debug@4.3.4
-      '@fluidframework/gitresources': 4.0.0
-      '@fluidframework/protocol-base': 4.0.0
+      '@fluidframework/gitresources': 4.0.1
+      '@fluidframework/protocol-base': 4.0.1
       '@fluidframework/protocol-definitions': 3.2.0
-      '@fluidframework/server-services-client': 4.0.0
+      '@fluidframework/server-services-client': 4.0.1
       '@fluidframework/telemetry-utils': 2.0.0-rc.4.0.0
       cross-fetch: 3.1.8
       json-stringify-safe: 5.0.1
@@ -18281,9 +18391,9 @@ packages:
     resolution: {integrity: sha512-3RM55xj1PrlUBYjGbtiBTMk8oFcNKUa+aofTBcoYiJsNvI7qOSifRvgl7TBLxPKLBSjZ25NjYBo0NXSG0p0l5A==}
     dependencies:
       '@fluidframework/common-utils': 3.1.0
-      '@fluidframework/server-services-client': 4.0.0
-      '@fluidframework/server-services-core': 4.0.0
-      '@fluidframework/server-services-telemetry': 4.0.0
+      '@fluidframework/server-services-client': 4.0.1
+      '@fluidframework/server-services-core': 4.0.1
+      '@fluidframework/server-services-telemetry': 4.0.1
       assert: 2.1.0
       async: 3.2.5
       events: 3.3.0
@@ -18314,13 +18424,13 @@ packages:
     dependencies:
       '@fluidframework/common-definitions': 1.1.0
       '@fluidframework/common-utils': 3.1.0
-      '@fluidframework/gitresources': 4.0.0
-      '@fluidframework/protocol-base': 4.0.0
+      '@fluidframework/gitresources': 4.0.1
+      '@fluidframework/protocol-base': 4.0.1
       '@fluidframework/protocol-definitions': 3.2.0
       '@fluidframework/server-lambdas-driver': 4.0.0
-      '@fluidframework/server-services-client': 4.0.0
-      '@fluidframework/server-services-core': 4.0.0
-      '@fluidframework/server-services-telemetry': 4.0.0
+      '@fluidframework/server-services-client': 4.0.1
+      '@fluidframework/server-services-core': 4.0.1
+      '@fluidframework/server-services-telemetry': 4.0.1
       '@types/semver': 7.5.6
       assert: 2.1.0
       async: 3.2.5
@@ -18440,12 +18550,12 @@ packages:
     resolution: {integrity: sha512-/Da91g+VnTUJu8Byp58csSRGsjLB9Ju+a0788Ag/IcwUBjYEDUWe8jlCLCdnNOScZnFW9W88R+F2RTC0LFlMOg==}
     dependencies:
       '@fluidframework/common-utils': 3.1.0
-      '@fluidframework/protocol-base': 4.0.0
+      '@fluidframework/protocol-base': 4.0.1
       '@fluidframework/protocol-definitions': 3.2.0
-      '@fluidframework/server-lambdas': 4.0.0_debug@4.3.4
-      '@fluidframework/server-services-client': 4.0.0
-      '@fluidframework/server-services-core': 4.0.0
-      '@fluidframework/server-services-telemetry': 4.0.0
+      '@fluidframework/server-lambdas': 4.0.1_debug@4.3.4
+      '@fluidframework/server-services-client': 4.0.1
+      '@fluidframework/server-services-core': 4.0.1
+      '@fluidframework/server-services-telemetry': 4.0.1
       '@types/debug': 4.1.12
       '@types/double-ended-queue': 2.1.7
       '@types/lodash': 4.14.202
@@ -26151,7 +26261,6 @@ packages:
       buffer: 5.7.1
       inherits: 2.0.4
       readable-stream: 3.6.2
-    dev: true
 
   /blessed/0.1.81:
     resolution: {integrity: sha512-LoF5gae+hlmfORcG1M5+5XZi4LBmvlXTzwJWzUlPryN/SJdSflZvROM2TwkT0GMpq7oqT48NRd4GS7BiVBc5OQ==}
@@ -26988,7 +27097,6 @@ packages:
 
   /chownr/1.1.4:
     resolution: {integrity: sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg==}
-    dev: true
 
   /chownr/2.0.0:
     resolution: {integrity: sha512-bIomtDF5KGpdogkLd9VspvFzk9KfpyyGlS8YFVZl7TGPBHL5snIOnxeshwVgPteQ9b4Eydl+pVbIyE1DcvCWgQ==}
@@ -28477,7 +28585,6 @@ packages:
   /deep-extend/0.6.0:
     resolution: {integrity: sha512-LOHxIOaPYdHlJRtCQfDIVZtfw/ufM8+rVj649RIHzcm/vGwQRXFt6OPqIFWsm2XEMrNIEtWR64sY1LEKD2vAOA==}
     engines: {node: '>=4.0.0'}
-    dev: true
 
   /deep-is/0.1.4:
     resolution: {integrity: sha512-oIPzksmTg4/MriiaYGO+okXDT7ztn/w3Eptv/+gSIdMdKsJo0u4CfYNFJPy+4SKMuCqGw2wxnA+URMg3t8a/bQ==}
@@ -28692,6 +28799,11 @@ packages:
     resolution: {integrity: sha512-Mc7QhQ8s+cLrnUfU/Ji94vG/r8M26m8f++vyres4ZoojaRDpZ1eSIh/EpzLNwlWuvzSZ3UbDFspjFvTDXe6e/g==}
     engines: {node: '>=12.20'}
     dev: true
+
+  /detect-libc/2.0.3:
+    resolution: {integrity: sha512-bwy0MGW55bG41VqxxypOsdSdGqLwXPI/focwgTYCFMbdUiBAxLg9CFzG08sz2aqzknwiX7Hkl0bQENjg8iLByw==}
+    engines: {node: '>=8'}
+    dev: false
 
   /detect-newline/2.1.0:
     resolution: {integrity: sha512-CwffZFvlJffUg9zZA0uqrjQayUTC8ob94pnr5sFwaVv3IOmkfUHcWH+jXaQK3askE51Cqe8/9Ql/0uXNwqZ8Zg==}
@@ -29136,7 +29248,6 @@ packages:
     resolution: {integrity: sha512-+uw1inIHVPQoaVuHzRyXd21icM+cnt4CzD5rW+NC1wjOUSTOs+Te7FOv7AhN7vS9x/oIyhLP5PR1H+phQAHu5Q==}
     dependencies:
       once: 1.4.0
-    dev: true
 
   /endent/2.1.0:
     resolution: {integrity: sha512-r8VyPX7XL8U01Xgnb1CjZ3XV+z90cXIJ9JPE/R9SEC9vpw2P6CfsRPJmp20DppC5N7ZAMCmjYkJIa744Iyg96w==}
@@ -30144,6 +30255,11 @@ packages:
       - supports-color
     dev: true
 
+  /expand-template/2.0.3:
+    resolution: {integrity: sha512-XYfuKMvj4O35f/pOXLObndIRvyQ+/+6AhODh+OKWj9S9498pHHn/IMszH+gt0fBCRWMNfk1ZSp5x3AifmnI2vg==}
+    engines: {node: '>=6'}
+    dev: false
+
   /expand-tilde/1.2.2:
     resolution: {integrity: sha512-rtmc+cjLZqnu9dSYosX9EWmSJhTwpACgJQTfj4hgg2JjOD/6SIQalZrt4a3aQeh++oNxkazcaxrhPUj6+g5G/Q==}
     engines: {node: '>=0.10.0'}
@@ -30941,6 +31057,10 @@ packages:
       readable-stream: 2.3.8
     dev: true
 
+  /fs-constants/1.0.0:
+    resolution: {integrity: sha512-y6OAwoSIf7FyjMIv94u+b5rdheZEjzR63GTyZJm5qh4Bi+2YgwLCcI/fPFZkL5PSixOt6ZNKm+w+Hfp/Bciwow==}
+    dev: false
+
   /fs-exists-sync/0.1.0:
     resolution: {integrity: sha512-cR/vflFyPZtrN6b38ZyWxpWdhlXrzZEBawlpBQMq7033xVY7/kg0GDMBK5jg8lDYQckdJ5x/YC88lM3C7VMsLg==}
     engines: {node: '>=0.10.0'}
@@ -31234,6 +31354,10 @@ packages:
   /git-sha1/0.1.2:
     resolution: {integrity: sha512-2e/nZezdVlyCopOCYHeW0onkbZg7xP1Ad6pndPy1rCygeRykefUS6r7oA5cJRGEFvseiaz5a/qUHFVX1dd6Isg==}
     dev: true
+
+  /github-from-package/0.0.0:
+    resolution: {integrity: sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw==}
+    dev: false
 
   /github-slugger/1.5.0:
     resolution: {integrity: sha512-wIh+gKBI9Nshz2o46B0B3f5k/W+WI9ZAv6y5Dn5WJ5SK1t0TnDimB4WE5rmTD05ZAIn8HALCZVmCsvj0w0v0lw==}
@@ -32469,7 +32593,6 @@ packages:
 
   /ini/1.3.8:
     resolution: {integrity: sha512-JV/yugV2uzW5iMRSiZAyDtQd+nxtUnjeLt0acNdw98kKLrvuRVyB80tsREOE7yvGVgalhZ6RNXCmEHkUKBKxew==}
-    dev: true
 
   /ini/2.0.0:
     resolution: {integrity: sha512-7PnF4oN3CvZF23ADhA5wRaYEQpJ8qygSkbtTXWBeXWXmEVRXK+1ITciHWwHhsjv1TmW0MgacIv6hEi5pX5NQdA==}
@@ -34522,11 +34645,26 @@ packages:
       ecdsa-sig-formatter: 1.0.11
       safe-buffer: 5.2.1
 
+  /jwa/2.0.0:
+    resolution: {integrity: sha512-jrZ2Qx916EA+fq9cEAeCROWPTfCwi1IVHqT2tapuqLEVVDKFDENFw1oL+MwrTvH6msKxsd1YTDVw6uKEcsrLEA==}
+    dependencies:
+      buffer-equal-constant-time: 1.0.1
+      ecdsa-sig-formatter: 1.0.11
+      safe-buffer: 5.2.1
+    dev: false
+
   /jws/3.2.2:
     resolution: {integrity: sha512-YHlZCB6lMTllWDtSPHz/ZXTsi8S00usEV6v1tjq8tOUZzw7DpSDWVXjXDre6ed1w/pd495ODpHZYSdkRTsa0HA==}
     dependencies:
       jwa: 1.4.1
       safe-buffer: 5.2.1
+
+  /jws/4.0.0:
+    resolution: {integrity: sha512-KDncfTmOZoOMTFG4mBlG0qUIOlc03fmzH+ru6RgYVZhPkyiy/92Owlt/8UEN+a4TXR1FQetfIpJE8ApdvdVxTg==}
+    dependencies:
+      jwa: 2.0.0
+      safe-buffer: 5.2.1
+    dev: false
 
   /jwt-decode/3.1.2:
     resolution: {integrity: sha512-UfpWE/VZn0iP50d8cz9NrZLM9lSWhcJ+0Gt/nm4by88UL+J1SiKN8/5dkjMmbEzwL2CAe+67GsegCbIKtbp75A==}
@@ -34538,6 +34676,14 @@ packages:
 
   /keyborg/2.5.0:
     resolution: {integrity: sha512-nb4Ji1suqWqj6VXb61Jrs4ab/UWgtGph4wDch2NIZDfLBUObmLcZE0aiDjZY49ghtu03fvwxDNvS9ZB0XMz6/g==}
+    dev: false
+
+  /keytar/7.9.0:
+    resolution: {integrity: sha512-VPD8mtVtm5JNtA2AErl6Chp06JBfy7diFQ7TQQhdpWOl6MrCRB+eRbvAZUsbGQS9kiMq0coJsy0W0vHpDCkWsQ==}
+    requiresBuild: true
+    dependencies:
+      node-addon-api: 4.3.0
+      prebuild-install: 7.1.2
     dev: false
 
   /keyv/3.1.0:
@@ -35994,6 +36140,10 @@ packages:
     engines: {node: '>= 8.0.0'}
     dev: true
 
+  /mkdirp-classic/0.5.3:
+    resolution: {integrity: sha512-gKLcREMhtuZRwRAfqP3RFW+TK4JqApVBtOIftVgjuABpAtpxhPGaDcfvbhNvD0B8iD1oUr/txX35NjcaY6Ns/A==}
+    dev: false
+
   /mkdirp/0.5.6:
     resolution: {integrity: sha512-FP+p8RB8OWpF3YZBCrP5gtADmtXApB5AMLn+vdyA+PyxCjrCs00mjyUozssO33cwDeT3wNGdLxJ5M//YqtHAJw==}
     hasBin: true
@@ -36255,6 +36405,10 @@ packages:
       - supports-color
     dev: true
 
+  /napi-build-utils/1.0.2:
+    resolution: {integrity: sha512-ONmRUqK7zj7DWX0D9ADe03wbwOBZxNAfF20PlGfCWQcD3+/MakShIHrMqx9YwPTfxDdF1zLeL+RGZiR9kGMLdg==}
+    dev: false
+
   /napi-macros/2.2.2:
     resolution: {integrity: sha512-hmEVtAGYzVQpCKdbQea4skABsdXW4RUh5t5mJ2zzqowJS2OyXZTU1KhDVFhx+NlWZ4ap9mqR9TcDO3LTTttd+g==}
 
@@ -36358,6 +36512,17 @@ packages:
     transitivePeerDependencies:
       - supports-color
     dev: true
+
+  /node-abi/3.62.0:
+    resolution: {integrity: sha512-CPMcGa+y33xuL1E0TcNIu4YyaZCxnnvkVaEXrsosR3FxN+fV8xvb7Mzpb7IgKler10qeMkE6+Dp8qJhpzdq35g==}
+    engines: {node: '>=10'}
+    dependencies:
+      semver: 7.6.0
+    dev: false
+
+  /node-addon-api/4.3.0:
+    resolution: {integrity: sha512-73sE9+3UaLYYFmDsFZnqCInzPyh3MqIwZO9cw58yIqAZhONrrabrYyYe3TuIqtIiOuTXVhsGau8hcrhhwSsDIQ==}
+    dev: false
 
   /node-cleanup/2.1.2:
     resolution: {integrity: sha512-qN8v/s2PAJwGUtr1/hYTpNKlD6Y9rc4p8KSmJXyGdYGZsDGKXrGThikLFP9OCHFeLeEpQzPwiAtdIvBLqm//Hw==}
@@ -38010,6 +38175,25 @@ packages:
       posthtml-render: 1.4.0
     dev: true
 
+  /prebuild-install/7.1.2:
+    resolution: {integrity: sha512-UnNke3IQb6sgarcZIDU3gbMeTp/9SSU1DAIkil7PrqG1vZlBtY5msYccSKSHDqa3hNg436IXK+SNImReuA1wEQ==}
+    engines: {node: '>=10'}
+    hasBin: true
+    dependencies:
+      detect-libc: 2.0.3
+      expand-template: 2.0.3
+      github-from-package: 0.0.0
+      minimist: 1.2.8
+      mkdirp-classic: 0.5.3
+      napi-build-utils: 1.0.2
+      node-abi: 3.62.0
+      pump: 3.0.0
+      rc: 1.2.8
+      simple-get: 4.0.1
+      tar-fs: 2.1.1
+      tunnel-agent: 0.6.0
+    dev: false
+
   /preferred-pm/3.1.2:
     resolution: {integrity: sha512-nk7dKrcW8hfCZ4H6klWcdRknBOXWzNQByJ0oJyX97BOupsYD+FzLS4hflgEu/uPUEHZCuRfMxzCBsuWd7OzT8Q==}
     engines: {node: '>=10'}
@@ -38506,7 +38690,6 @@ packages:
     dependencies:
       end-of-stream: 1.4.4
       once: 1.4.0
-    dev: true
 
   /pumpify/1.5.1:
     resolution: {integrity: sha512-oClZI37HvuUJJxSKKrC17bZ9Cu0ZYhEAGPsPUy9KlMUmv9dKX2o77RUmq7f3XjIxbwyGwYzbzQ1L2Ks8sIradQ==}
@@ -38720,7 +38903,6 @@ packages:
       ini: 1.3.8
       minimist: 1.2.8
       strip-json-comments: 2.0.1
-    dev: true
 
   /re-resizable/6.9.11_sfoxds7t5ydpegc3knd667wn6m:
     resolution: {integrity: sha512-a3hiLWck/NkmyLvGWUuvkAmN1VhwAz4yOhS6FdMTaxCUVN9joIWkT11wsO68coG/iEYuwn+p/7qAmfQzRhiPLQ==}
@@ -40964,6 +41146,11 @@ packages:
       internal-slot: 1.0.6
     dev: true
 
+  /stoppable/1.1.0:
+    resolution: {integrity: sha512-KXDYZ9dszj6bzvnEMRYvxgeTHU74QBFL54XKtP3nyMuJ81CFYtABZ3bAzL2EdFUaEwJOBOgENyFj3R7oTzDyyw==}
+    engines: {node: '>=4', npm: '>=6'}
+    dev: false
+
   /store2/2.14.2:
     resolution: {integrity: sha512-siT1RiqlfQnGqgT/YzXVUNsom9S0H1OX+dpdGN1xkyYATo4I6sep5NmsRD/40s3IIOvlCq6akxkqG82urIZW1w==}
     dev: true
@@ -41247,7 +41434,6 @@ packages:
   /strip-json-comments/2.0.1:
     resolution: {integrity: sha512-4gB8na07fecVVkOI6Rs4e7T6NOTki5EmL7TUduTs6bu3EdnSycntVJ4re8kgZA+wx9IueI2Y11bfbgwtzuE0KQ==}
     engines: {node: '>=0.10.0'}
-    dev: true
 
   /strip-json-comments/3.1.1:
     resolution: {integrity: sha512-6fPc+R4ihwqP6N/aIv2f1gMH8lOVtWQHoqC4yK6oSDVVocumAsfCqjkXnqiYMhmMwS/mEHLp7Vehlt3ql6lEig==}
@@ -41627,6 +41813,15 @@ packages:
     resolution: {integrity: sha512-GNzQvQTOIP6RyTfE2Qxb8ZVlNmw0n88vp1szwWRimP02mnTsx3Wtn5qRdqY9w2XduFNUgvOwhNnQsjwCp+kqaQ==}
     engines: {node: '>=6'}
 
+  /tar-fs/2.1.1:
+    resolution: {integrity: sha512-V0r2Y9scmbDRLCNex/+hYzvp/zyYjvFbHPNgVTKfQvVrb6guiE/fxP+XblDNR011utopbkex2nM4dHNV6GDsng==}
+    dependencies:
+      chownr: 1.1.4
+      mkdirp-classic: 0.5.3
+      pump: 3.0.0
+      tar-stream: 2.2.0
+    dev: false
+
   /tar-fs/3.0.5:
     resolution: {integrity: sha512-JOgGAmZyMgbqpLwct7ZV8VzkEB6pxXFBVErLtb+XCOqzc6w1xiWKI9GVd6bwk68EX7eJ4DWmfXVmq8K2ziZTGg==}
     dependencies:
@@ -41636,6 +41831,17 @@ packages:
       bare-fs: 2.1.5
       bare-path: 2.1.0
     dev: true
+
+  /tar-stream/2.2.0:
+    resolution: {integrity: sha512-ujeqbceABgwMZxEJnk2HDY2DlnUZ+9oEcb1KzTVfYHio0UE6dG71n60d8D2I4qNvleWrrXpmjpt7vZeF1LnMZQ==}
+    engines: {node: '>=6'}
+    dependencies:
+      bl: 4.1.0
+      end-of-stream: 1.4.4
+      fs-constants: 1.0.0
+      inherits: 2.0.4
+      readable-stream: 3.6.2
+    dev: false
 
   /tar-stream/3.1.7:
     resolution: {integrity: sha512-qJj60CXt7IU1Ffyc3NJMjh6EkuCFej46zUqJ4J7pqYlThyd9bO0XBTmcOIhSzZJVWfsLks0+nle/j538YAW9RQ==}
@@ -42358,7 +42564,6 @@ packages:
     resolution: {integrity: sha512-McnNiV1l8RYeY8tBgEpuodCC1mLUdbSN+CYBL7kJsJNInOP8UjDDEwdk6Mw60vdLLrr5NHKZhMAOSrR2NZuQ+w==}
     dependencies:
       safe-buffer: 5.2.1
-    dev: true
 
   /tunnel/0.0.6:
     resolution: {integrity: sha512-1h/Lnq9yajKY2PEbBadPXj3VxsDDu844OnaAo52UVmIzIvwwtBPIuNvkjuzBlTWpfJyUbG3ez0KSBibQkj4ojg==}

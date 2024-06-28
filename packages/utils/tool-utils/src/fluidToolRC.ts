@@ -10,6 +10,7 @@ import util from "util";
 
 import { IOdspTokens } from "@fluidframework/odsp-doclib-utils/internal";
 import { lock } from "proper-lockfile";
+import type { AuthenticationRecord } from "@azure/identity";
 
 /**
  * @internal
@@ -33,6 +34,7 @@ export interface IResources {
 			};
 		};
 	};
+	mruAuthRecord?: AuthenticationRecord;
 }
 
 const getRCFileName = () => path.join(os.homedir(), ".fluidtoolrc");

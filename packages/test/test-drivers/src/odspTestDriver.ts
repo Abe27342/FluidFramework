@@ -23,7 +23,6 @@ import {
 	OdspTokenConfig,
 	OdspTokenManager,
 	getMicrosoftConfiguration,
-	odspTokensCache,
 } from "@fluidframework/tool-utils/internal";
 import { compare } from "semver";
 
@@ -129,7 +128,7 @@ function getCredentials(
  */
 export class OdspTestDriver implements ITestDriver {
 	// Share the tokens and driverId across multiple instance of the test driver
-	private static readonly odspTokenManager = new OdspTokenManager(odspTokensCache);
+	private static readonly odspTokenManager = new OdspTokenManager();
 	private static readonly driveIdPCache = new Map<string, Promise<string>>();
 	// Choose a single random user up front for legacy driver which doesn't support isolateSocketCache
 	private static readonly legacyDriverUserRandomIndex = Math.random();

@@ -91,6 +91,8 @@
 		"temp-directory": "nyc/.nyc_output"
 	},
 	"dependencies": {
+		"@azure/identity": "^4.2.0",
+		"@azure/identity-cache-persistence": "^1.1.0",
 		"@fluidframework/core-utils": "workspace:~",
 		"@fluidframework/driver-utils": "workspace:~",
 		"@fluidframework/odsp-doclib-utils": "workspace:~",

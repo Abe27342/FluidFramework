@@ -354,13 +354,13 @@ use_old_FunctionDeclaration_lockRC(
  * If this test starts failing, it indicates a change that is not forward compatible.
  * To acknowledge the breaking change, add the following to package.json under
  * typeValidation.broken:
- * "VariableDeclaration_odspTokensCache": {"forwardCompat": false}
+ * "RemovedVariableDeclaration_odspTokensCache": {"forwardCompat": false}
  */
 declare function get_old_VariableDeclaration_odspTokensCache():
     TypeOnly<typeof old.odspTokensCache>;
-declare function use_current_VariableDeclaration_odspTokensCache(
+declare function use_current_RemovedVariableDeclaration_odspTokensCache(
     use: TypeOnly<typeof current.odspTokensCache>): void;
-use_current_VariableDeclaration_odspTokensCache(
+use_current_RemovedVariableDeclaration_odspTokensCache(
     get_old_VariableDeclaration_odspTokensCache());
 
 /*
@@ -368,14 +368,14 @@ use_current_VariableDeclaration_odspTokensCache(
  * If this test starts failing, it indicates a change that is not backward compatible.
  * To acknowledge the breaking change, add the following to package.json under
  * typeValidation.broken:
- * "VariableDeclaration_odspTokensCache": {"backCompat": false}
+ * "RemovedVariableDeclaration_odspTokensCache": {"backCompat": false}
  */
-declare function get_current_VariableDeclaration_odspTokensCache():
+declare function get_current_RemovedVariableDeclaration_odspTokensCache():
     TypeOnly<typeof current.odspTokensCache>;
 declare function use_old_VariableDeclaration_odspTokensCache(
     use: TypeOnly<typeof old.odspTokensCache>): void;
 use_old_VariableDeclaration_odspTokensCache(
-    get_current_VariableDeclaration_odspTokensCache());
+    get_current_RemovedVariableDeclaration_odspTokensCache());
 
 /*
  * Validate forward compatibility by using the old type in place of the current type.

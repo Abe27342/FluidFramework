@@ -13,7 +13,6 @@ import {
 	OdspTokenConfig,
 	OdspTokenManager,
 	getMicrosoftConfiguration,
-	odspTokensCache,
 } from "@fluidframework/tool-utils/internal";
 import Axios from "axios";
 import express from "express";
@@ -24,7 +23,7 @@ import { createManifestResponse } from "./bohemiaIntercept.js";
 import { tinyliciousUrls } from "./getUrlResolver.js";
 import { RouteOptions } from "./loader.js";
 
-const tokenManager = new OdspTokenManager(odspTokensCache);
+const tokenManager = new OdspTokenManager();
 let odspAuthStage = 0;
 let odspAuthLock: Promise<void> | undefined;
 

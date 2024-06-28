@@ -9,7 +9,6 @@ import {
 	OdspTokenConfig,
 	OdspTokenManager,
 	getMicrosoftConfiguration,
-	odspTokensCache,
 } from "@fluidframework/tool-utils/internal";
 import express, { type Response } from "express";
 import webpack from "webpack";
@@ -67,7 +66,7 @@ async function getOdspToken(res: Response, originalUrl: string): Promise<boolean
 		navigator: (url: string) => response.redirect(url),
 		redirectUriCallback,
 	});
-	const tokenManager = new OdspTokenManager(odspTokensCache);
+	const tokenManager = new OdspTokenManager();
 	await tokenManager.getOdspTokens(
 		getServer("spo-df"),
 		getMicrosoftConfiguration(),
