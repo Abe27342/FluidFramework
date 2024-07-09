@@ -119,14 +119,16 @@ function createCompatSuite(
 
 				afterEach(function (done: Mocha.Done) {
 					const logErrors = getUnexpectedLogErrorException(provider.tracker);
-					// if the test failed for another reason
-					// then we don't need to check errors
-					// and fail the after each as well
-					if (this.currentTest?.state === "passed") {
-						done(logErrors);
-					} else {
+					if (logErrors === undefined) {
 						done();
+					} else {
+						if (this.currentTest?.err) {
+							done(new AggregateError([this.currentTest.err, logErrors]));
+						} else {
+							done(logErrors);
+						}
 					}
+
 					if (resetAfterEach) {
 						provider.reset();
 					}
