@@ -199,12 +199,310 @@ export interface IInternalMockRuntimeMessage {
 }
 
 /**
+ * Things removed:
+ * - grouped batching
+ * - flush mode
+ *
+ *
+ * Things I want back / support for:
+ * - id compressor
+ */
+
+/**
  * Mock implementation of IContainerRuntime for testing basic submitting and processing of messages.
  * If test specific logic is required, extend this class and add the logic there. For an example, take a look
  * at MockContainerRuntimeForReconnection.
  * @legacy
  * @alpha
  */
+// export class MockContainerRuntime2 extends TypedEventEmitter<IContainerRuntimeEvents> {
+// 	public clientId: string;
+// 	public readonly deltaManager: MockDeltaManager;
+// 	/**
+// 	 * @deprecated use the associated datastore to create the delta connection
+// 	 */
+// 	protected readonly deltaConnections: MockDeltaConnection[] = [];
+// 	protected readonly pendingMessages: IMockContainerRuntimePendingMessage[] = [];
+// 	protected readonly outbox: IInternalMockRuntimeMessage[] = [];
+// 	private readonly idAllocationOutbox: IInternalMockRuntimeMessage[] = [];
+// 	/**
+// 	 * The runtime options this instance is using. See {@link IMockContainerRuntimeOptions}.
+// 	 */
+// 	private readonly runtimeOptions: Required<IMockContainerRuntimeOptions>;
+
+// 	constructor(
+// 		protected readonly dataStoreRuntime: MockFluidDataStoreRuntime,
+// 		protected readonly factory: MockContainerRuntimeFactory,
+// 		mockContainerRuntimeOptions: IMockContainerRuntimeOptions = defaultMockContainerRuntimeOptions,
+// 		protected readonly overrides?: { minimumSequenceNumber?: number | undefined },
+// 	) {
+// 		super();
+// 		this.deltaManager = new MockDeltaManager(() => this.clientId);
+// 		this.deltaManager.inbound.on("push", (message: ISequencedDocumentMessage) => {
+// 			this.factory.pushMessage(message);
+// 		});
+
+// 		const msn = overrides?.minimumSequenceNumber;
+// 		if (msn !== undefined) {
+// 			this.deltaManager.lastSequenceNumber = msn;
+// 			this.deltaManager.minimumSequenceNumber = msn;
+// 		}
+// 		// Set FluidDataStoreRuntime's deltaManager to ours so that they are in sync.
+// 		this.dataStoreRuntime.deltaManagerInternal = this.deltaManager;
+// 		this.dataStoreRuntime.quorum = factory.quorum;
+// 		this.dataStoreRuntime.containerRuntime = this;
+// 		// FluidDataStoreRuntime already creates a clientId, reuse that so they are in sync.
+// 		this.clientId = this.dataStoreRuntime.clientId ?? uuid();
+// 		factory.quorum.addMember(this.clientId, {});
+// 		this.runtimeOptions = makeContainerRuntimeOptions(mockContainerRuntimeOptions);
+// 		assert(
+// 			this.runtimeOptions.flushMode !== FlushMode.Immediate ||
+// 				!this.runtimeOptions.enableGroupedBatching,
+// 			"Grouped batching is not compatible with FlushMode.Immediate",
+// 		);
+// 	}
+
+// 	/**
+// 	 * @deprecated use the associated datastore to create the delta connection
+// 	 */
+// 	public createDeltaConnection(): MockDeltaConnection {
+// 		const deltaConnection = this.dataStoreRuntime.createDeltaConnection();
+// 		this.deltaConnections.push(deltaConnection);
+// 		return deltaConnection;
+// 	}
+
+// 	public finalizeIdRange(range: IdCreationRange) {
+// 		assert(
+// 			this.dataStoreRuntime.idCompressor !== undefined,
+// 			"Shouldn't try to finalize IdRanges without an IdCompressor",
+// 		);
+// 		this.dataStoreRuntime.idCompressor.finalizeCreationRange(range);
+// 	}
+
+// 	public submit(messageContent: any, localOpMetadata?: unknown): number {
+// 		const clientSequenceNumber = ++this.deltaManager.clientSequenceNumber;
+// 		const message: IInternalMockRuntimeMessage = {
+// 			content: messageContent,
+// 			localOpMetadata,
+// 		};
+
+// 		const isAllocationMessage = this.isAllocationMessage(message.content);
+
+// 		switch (this.runtimeOptions.flushMode) {
+// 			case FlushMode.Immediate: {
+// 				if (!isAllocationMessage) {
+// 					const idAllocationOp = this.generateIdAllocationOp();
+// 					if (idAllocationOp !== undefined) {
+// 						this.submitInternal(idAllocationOp, clientSequenceNumber);
+// 					}
+// 				}
+// 				this.submitInternal(message, clientSequenceNumber);
+// 				break;
+// 			}
+
+// 			case FlushMode.TurnBased: {
+// 				// Id allocation messages are directly submitted during the resubmit path
+// 				if (isAllocationMessage) {
+// 					this.idAllocationOutbox.push(message);
+// 				} else {
+// 					this.outbox.push(message);
+// 				}
+// 				break;
+// 			}
+
+// 			default:
+// 				throw new Error(`Unsupported FlushMode ${this.runtimeOptions.flushMode}`);
+// 		}
+
+// 		return clientSequenceNumber;
+// 	}
+
+// 	private isSequencedAllocationMessage(
+// 		message: ISequencedDocumentMessage,
+// 	): message is IMockContainerRuntimeSequencedIdAllocationMessage {
+// 		return this.isAllocationMessage(message.contents);
+// 	}
+
+// 	private isAllocationMessage(
+// 		message: any,
+// 	): message is IMockContainerRuntimeIdAllocationMessage {
+// 		return (
+// 			message !== undefined &&
+// 			(message as IMockContainerRuntimeIdAllocationMessage).type === "idAllocation"
+// 		);
+// 	}
+
+// 	public dirty(): void {}
+// 	public get isDirty() {
+// 		return this.pendingMessages.length > 0;
+// 	}
+
+// 	/**
+// 	 * If flush mode is set to FlushMode.TurnBased, it will send all messages queued since the last time
+// 	 * this method was called. Otherwise, calling the method does nothing.
+// 	 */
+// 	public flush() {
+// 		if (this.runtimeOptions.flushMode !== FlushMode.TurnBased) {
+// 			return;
+// 		}
+
+// 		// This mimics the runtime behavior of the IdCompressor by generating an IdAllocationOp
+// 		// and sticking it in front of any op that might rely on that id. It differs slightly in that
+// 		// in the actual runtime it would get put in its own separate batch
+// 		const idAllocationOp = this.generateIdAllocationOp();
+// 		if (idAllocationOp !== undefined) {
+// 			this.idAllocationOutbox.push(idAllocationOp);
+// 		}
+
+// 		// As with the runtime behavior, we need to send the idAllocationOps first
+// 		const messagesToSubmit = this.idAllocationOutbox.concat(this.outbox);
+// 		this.idAllocationOutbox.length = 0;
+// 		this.outbox.length = 0;
+
+// 		let fakeClientSequenceNumber = 1;
+// 		messagesToSubmit.forEach((message) => {
+// 			this.submitInternal(
+// 				message,
+// 				// When grouped batching is used, the ops within the same grouped batch will have
+// 				// fake sequence numbers when they're ungrouped. The submit function will still
+// 				// return the clientSequenceNumber but this will ensure that the readers will always
+// 				// read the fake client sequence numbers.
+// 				this.runtimeOptions.enableGroupedBatching
+// 					? fakeClientSequenceNumber++
+// 					: this.deltaManager.clientSequenceNumber,
+// 			);
+// 		});
+// 	}
+
+// 	/**
+// 	 * If flush mode is set to FlushMode.TurnBased, it will rebase the current batch by resubmitting them
+// 	 * to the data stores. Otherwise, calling the method does nothing.
+// 	 *
+// 	 * The method requires `runtimeOptions.enableGroupedBatching` to be enabled.
+// 	 */
+// 	public rebase() {
+// 		if (this.runtimeOptions.flushMode !== FlushMode.TurnBased) {
+// 			return;
+// 		}
+
+// 		assert(
+// 			this.runtimeOptions.enableGroupedBatching,
+// 			"Rebasing is not supported when group batching is disabled",
+// 		);
+
+// 		// Only outbox needs to be rebased. The idAllocationOutbox is not rebased, as that
+// 		// is a no-op (though resubmitting the other ops may generate new IDs)
+// 		const messagesToRebase = this.outbox.slice();
+// 		this.outbox.length = 0;
+
+// 		this.reSubmitMessages(messagesToRebase);
+// 	}
+
+// 	protected reSubmitMessages(
+// 		messagesToResubmit: { content: any; localOpMetadata?: unknown }[],
+// 	): void {
+// 		// Sort the messages so that idAllocation messages are submitted first
+// 		// When resubmitting non-idAllocation messages, they may generate new IDs.
+// 		// This sort ensures that all ID ranges are finalized before they are
+// 		// needed (i.e. before the messages that rely on them are processed)
+// 		// and in the order they were allocated
+// 		const orderedMessages = messagesToResubmit
+// 			.filter((message) => message.content.type === "idAllocation")
+// 			.concat(messagesToResubmit.filter((message) => message.content.type !== "idAllocation"));
+// 		orderedMessages.forEach((pendingMessage) => {
+// 			if (pendingMessage.content.type === "idAllocation") {
+// 				this.submit(pendingMessage.content, pendingMessage.localOpMetadata);
+// 			} else {
+// 				this.dataStoreRuntime.reSubmit(pendingMessage.content, pendingMessage.localOpMetadata);
+// 			}
+// 		});
+// 	}
+
+// 	private generateIdAllocationOp(): IInternalMockRuntimeMessage | undefined {
+// 		const idRange = this.dataStoreRuntime.idCompressor?.takeNextCreationRange();
+// 		if (idRange?.ids !== undefined) {
+// 			const allocationOp: IMockContainerRuntimeIdAllocationMessage = {
+// 				type: "idAllocation",
+// 				contents: idRange,
+// 			};
+// 			return {
+// 				content: allocationOp,
+// 			};
+// 		}
+// 		return undefined;
+// 	}
+
+// 	private submitInternal(message: IInternalMockRuntimeMessage, clientSequenceNumber: number) {
+// 		// Here, we should instead push to the DeltaManager. And the DeltaManager will push things into the factory's messages
+// 		this.deltaManager.outbound.push([
+// 			{
+// 				clientSequenceNumber,
+// 				contents: message.content,
+// 				referenceSequenceNumber: this.deltaManager.lastSequenceNumber,
+// 				type: MessageType.Operation,
+// 			},
+// 		]);
+// 		this.addPendingMessage(message.content, message.localOpMetadata, clientSequenceNumber);
+// 	}
+
+// 	public process(message: ISequencedDocumentMessage) {
+// 		this.deltaManager.process(message);
+// 		const [local, localOpMetadata] = this.processInternal(message);
+
+// 		if (this.isSequencedAllocationMessage(message)) {
+// 			this.finalizeIdRange(message.contents.contents);
+// 		} else {
+// 			this.dataStoreRuntime.process(message, local, localOpMetadata);
+// 		}
+// 	}
+
+// 	protected addPendingMessage(
+// 		content: any,
+// 		localOpMetadata: unknown,
+// 		clientSequenceNumber: number,
+// 	) {
+// 		const pendingMessage: IMockContainerRuntimePendingMessage = {
+// 			referenceSequenceNumber: this.deltaManager.lastSequenceNumber,
+// 			content,
+// 			clientSequenceNumber,
+// 			localOpMetadata,
+// 		};
+// 		this.pendingMessages.push(pendingMessage);
+// 	}
+
+// 	private processInternal(message: ISequencedDocumentMessage): [boolean, unknown] {
+// 		let localOpMetadata: unknown;
+// 		const local = this.clientId === message.clientId;
+// 		if (local) {
+// 			const pendingMessage = this.pendingMessages.shift();
+// 			assert(
+// 				pendingMessage?.clientSequenceNumber === message.clientSequenceNumber,
+// 				"Unexpected message",
+// 			);
+// 			localOpMetadata = pendingMessage.localOpMetadata;
+// 		}
+// 		return [local, localOpMetadata];
+// 	}
+
+// 	public async resolveHandle(handle: IFluidHandle) {
+// 		return this.dataStoreRuntime.resolveHandle({
+// 			url: toFluidHandleInternal(handle).absolutePath,
+// 		});
+// 	}
+// }
+
+interface Checkpoint {
+	/**
+	 * The most recent sequence number that this document version has seen.
+	 */
+	sequenceNumber: number;
+}
+
+interface IMessageProcessor {
+	clientId: string;
+	process(message: ISequencedDocumentMessage): void;
+}
+
 export class MockContainerRuntime extends TypedEventEmitter<IContainerRuntimeEvents> {
 	public clientId: string;
 	public readonly deltaManager: MockDeltaManager;
@@ -222,7 +520,7 @@ export class MockContainerRuntime extends TypedEventEmitter<IContainerRuntimeEve
 
 	constructor(
 		protected readonly dataStoreRuntime: MockFluidDataStoreRuntime,
-		protected readonly factory: MockContainerRuntimeFactory,
+		protected readonly factory: MockContainerRuntimeFactory | MockServer,
 		mockContainerRuntimeOptions: IMockContainerRuntimeOptions = defaultMockContainerRuntimeOptions,
 		protected readonly overrides?: { minimumSequenceNumber?: number | undefined },
 	) {
@@ -478,6 +776,198 @@ export class MockContainerRuntime extends TypedEventEmitter<IContainerRuntimeEve
 		return this.dataStoreRuntime.resolveHandle({
 			url: toFluidHandleInternal(handle).absolutePath,
 		});
+	}
+}
+
+/**
+ * Like `MockContainerRuntimeFactory`, but specifically targeted for testing the DDS layer.
+ *
+ * Major differences and reasons for doing so:
+ * - Supports more fine-grained APIs on when to send ops to individual clients (see {@link advanceClientsTo}). This is necessary
+ *   to test specific interleavings of op send/receive between clients.
+ * - TBD: When reconnect is implemented, setting a runtime as disconnected no longer wipes the previously sent messages from `MockServer`.
+ *   This allows testing more authentically scenarios where a client reconnects and finds that, say, only the first half of the messages it
+ *   has sent were actually received by the server (and therefore it must resubmit only the remaining ones). It's also less confusing when looking
+ *   at tests.
+ * - Explicitly stores all sequenced messages in memory and never wipes them. This should be helpful for debugging.
+ * TODO: List concessions here
+ * - No grouped batching support (that's a container-runtime feature)
+ * TODO: How do new clients join? Who controls the summary load process / which checkpoint things went in at?
+ */
+export class MockServer {
+	private sequenceNumber = 0;
+	/**
+	 * Records the referenceSequenceNumber of the last message received from each client.
+	 * This is used to stamp minimumSequenceNumber values on the server's {@link ISequencedDocumentMessage}s.
+	 */
+	public minSeq = new Map<string, number>();
+	public readonly quorum = new MockQuorumClients();
+	/**
+	 * The MockContainerRuntimes we produce will push messages into this queue as they are submitted.
+	 * This is playing the role of the orderer, establishing a single universal order for the messages generated.
+	 */
+	protected messages: ISequencedDocumentMessage[] = [];
+	protected readonly runtimes: Set<IMessageProcessor> = new Set();
+	/**
+	 * Records the sequence number of the last message sent to each client.
+	 * Keyed on client id.
+	 *
+	 * Clients who have received no messages will be absent from the map.
+	 */
+	protected readonly lastMessageSeqSent: Map<string, number> = new Map();
+
+	/**
+	 * @returns a minimum sequence number for all connected clients.
+	 */
+	public getMinSeq(): number {
+		let minimumSequenceNumber: number | undefined;
+		for (const [client, clientSequenceNumber] of this.minSeq) {
+			// We have to make sure, a client is part of the quorum, when
+			// we compute the msn. We assume that the quorum accurately
+			// represents the currently connected clients. In some tests
+			// for reconnects, we will remove clients from the quorum
+			// to indicate they are currently not connected. In that case,
+			// they must no longer contribute to the msn computation.
+			if (this.quorum.getMember(client) !== undefined) {
+				minimumSequenceNumber =
+					minimumSequenceNumber === undefined
+						? clientSequenceNumber
+						: Math.min(minimumSequenceNumber, clientSequenceNumber);
+			}
+		}
+		return minimumSequenceNumber ?? 0;
+	}
+
+	public createContainerRuntime(
+		dataStoreRuntime: MockFluidDataStoreRuntime,
+		// TODO: Find better ways to validate usage is correct
+		summarySeqNum: number,
+		overrides?: { minimumSequenceNumber?: number; trackRemoteOps?: boolean },
+	): MockContainerRuntime {
+		// TODO: We could weaken this if we fix up logic around including this client in the quorum and them submitting ops (don't let them until they inbound enough,
+		// or e.g. auto-catch up to minSeq on client join). Should be good enough for now though.
+		assert(
+			summarySeqNum >= this.getMinSeq(),
+			"Cannot create a runtime at seq number lower than current min seq.",
+		);
+		const containerRuntime = new MockContainerRuntime(
+			dataStoreRuntime,
+			this,
+			defaultMockContainerRuntimeOptions,
+			overrides,
+		);
+		this.runtimes.add(containerRuntime);
+		// TODO: Pretty sure in fuzz testing you are no longer advancing the collab window due to the summarizer client.
+		this.minSeq.set(containerRuntime.clientId, summarySeqNum);
+		this.lastMessageSeqSent.set(containerRuntime.clientId, summarySeqNum);
+		return containerRuntime;
+	}
+
+	public addMessageProcessor(processor: IMessageProcessor) {
+		this.runtimes.add(processor);
+	}
+
+	public removeContainerRuntime(containerRuntime: MockContainerRuntime) {
+		// todo: remove 'last sent' message too?
+		this.runtimes.delete(containerRuntime);
+	}
+
+	public pushMessage(msg: Partial<ISequencedDocumentMessage>) {
+		// Some DDSes have historically had issues with mutating messages after submitting them to the server,
+		// which is generally not a good idea. To help catch these issues, we deep freeze the submitted message.
+		deepFreeze(msg);
+		// Explicitly clone the message before putting it "on the server" to mimic over-the-wire behavior.
+		const message = JSON.parse(JSON.stringify(msg)) as ISequencedDocumentMessage;
+
+		assert(
+			message.clientId !== undefined && message.clientId !== null,
+			"Expected clientId on submitted message",
+		);
+		assert(
+			message.referenceSequenceNumber !== undefined,
+			"Expected referenceSequenceNumber on submitted message",
+		);
+		this.minSeq.set(message.clientId, message.referenceSequenceNumber);
+
+		this.sequenceNumber++;
+		message.sequenceNumber = this.sequenceNumber;
+		message.minimumSequenceNumber = this.getMinSeq();
+
+		this.messages.push(message as ISequencedDocumentMessage);
+	}
+
+	public createCheckpoint(): Checkpoint {
+		// TODO: Name this? give any other information?
+		return { sequenceNumber: this.sequenceNumber };
+	}
+
+	public advanceClientsTo(
+		spec: {
+			target: MockContainerRuntime | "all";
+			checkpoint: Checkpoint;
+		}[],
+	): void {
+		assert(
+			spec.length === 1 || !spec.some((s) => s.target === "all"),
+			"Cannot mix 'all' with specific targets",
+		);
+		for (const { target, checkpoint } of spec) {
+			if (target === "all") {
+				for (const runtime of this.runtimes) {
+					this.advanceClientTo(runtime, checkpoint);
+				}
+			} else {
+				this.advanceClientTo(target, checkpoint);
+			}
+		}
+	}
+
+	public advanceClientTo(runtime: IMessageProcessor, checkpoint: Checkpoint) {
+		const lastMessageSeqSent = this.lastMessageSeqSent.get(runtime.clientId) ?? 0;
+		for (let i = lastMessageSeqSent; i < checkpoint.sequenceNumber; i++) {
+			const message = this.messages[i];
+			assert(message !== undefined, `No message found at sequence number ${i + 1}`);
+			assert(message.sequenceNumber === i + 1, "Unexpected sequence number on message");
+
+			runtime.process(message);
+
+			this.lastMessageSeqSent.set(runtime.clientId, message.sequenceNumber);
+		}
+	}
+
+	private verifyAllClientsAtSameSeq() {
+		const currentSeqs = new Set(this.lastMessageSeqSent.values());
+		assert(
+			currentSeqs.size === 1,
+			"Not all clients are at the same sequence number. Use advanceClientsTo to more precisely specify what you want.",
+		);
+	}
+
+	/**
+	 * Process one of the queued messages. Throws if no messages are queued or if clients are not all at the same sequence number.
+	 *
+	 * @deprecated - Please consider using checkpoints and {@link advanceClientsTo}) instead.
+	 */
+	public processOneMessage() {
+		this.processSomeMessages(1);
+	}
+
+	/**
+	 * Process a given number of queued messages.  Throws if there are fewer messages queued than requested.
+	 * @param count - the number of messages to process
+	 * @deprecated - Please consider using checkpoints and {@link advanceClientsTo}) instead.
+	 */
+	public processSomeMessages(count: number) {
+		this.verifyAllClientsAtSameSeq();
+		const seq = Array.from(this.lastMessageSeqSent.values())[0];
+		this.advanceClientsTo([{ target: "all", checkpoint: { sequenceNumber: seq + count } }]);
+	}
+
+	/**
+	 * Process all remaining messages in the queue.
+	 */
+	public processAllMessages() {
+		this.advanceClientsTo([{ target: "all", checkpoint: this.createCheckpoint() }]);
 	}
 }
 
@@ -810,6 +1300,7 @@ export class MockFluidDataStoreRuntime
 		idCompressor?: IIdCompressor & IIdCompressorCore;
 		attachState?: AttachState;
 		registry?: readonly IChannelFactory[];
+		options?: Record<string | number, any>;
 	}) {
 		super();
 		this.clientId = overrides?.clientId ?? uuid();
@@ -832,6 +1323,7 @@ export class MockFluidDataStoreRuntime
 		if (registry) {
 			this.registry = new Map(registry.map((factory) => [factory.type, factory]));
 		}
+		this.options = overrides?.options ?? {};
 	}
 
 	public readonly entryPoint: IFluidHandleInternal<FluidObject>;
@@ -852,7 +1344,7 @@ export class MockFluidDataStoreRuntime
 	public readonly documentId: string = undefined as any;
 	public readonly id: string;
 	public readonly existing: boolean = undefined as any;
-	public options: Record<string | number, any> = {};
+	public options: Record<string | number, any>;
 	public clientId: string;
 	public readonly path = "";
 	public readonly connected = true;

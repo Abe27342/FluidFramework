@@ -10,7 +10,8 @@ import type {
 	SerializedIdCompressorWithOngoingSession,
 } from "@fluidframework/id-compressor/internal";
 import type {
-	MockContainerRuntimeForReconnection,
+	MockContainerRuntime,
+	// MockContainerRuntimeForReconnection,
 	MockFluidDataStoreRuntime,
 } from "@fluidframework/test-runtime-utils/internal";
 
@@ -20,7 +21,7 @@ import type {
 export interface Client<TChannelFactory extends IChannelFactory> {
 	channel: ReturnType<TChannelFactory["create"]>;
 	dataStoreRuntime: MockFluidDataStoreRuntime;
-	containerRuntime: MockContainerRuntimeForReconnection;
+	containerRuntime: MockContainerRuntime;
 }
 
 /**
@@ -28,6 +29,7 @@ export interface Client<TChannelFactory extends IChannelFactory> {
  */
 export interface ClientLoadData {
 	minimumSequenceNumber: number;
+	summarySequenceNumber: number;
 	summaries: {
 		summary: ISummaryTree;
 		idCompressorSummary: FuzzSerializedIdCompressor | undefined;
@@ -72,7 +74,9 @@ export function createLoadData(
 ): ClientLoadData {
 	const compressor = client.dataStoreRuntime.idCompressor;
 	return {
-		minimumSequenceNumber: client.dataStoreRuntime.deltaManagerInternal.lastSequenceNumber,
+		// strange?
+		minimumSequenceNumber: client.dataStoreRuntime.deltaManagerInternal.minimumSequenceNumber,
+		summarySequenceNumber: client.dataStoreRuntime.deltaManagerInternal.lastSequenceNumber,
 		summaries: {
 			summary: client.channel.getAttachSummary().summary,
 			idCompressorSummary:
@@ -98,6 +102,7 @@ export function createLoadDataFromStashData(
 	const compressor = client.dataStoreRuntime.idCompressor;
 	return {
 		minimumSequenceNumber: stashData.minimumSequenceNumber,
+		summarySequenceNumber: client.dataStoreRuntime.deltaManagerInternal.lastSequenceNumber,
 		summaries: {
 			summary: stashData.summaries.summary,
 			idCompressorSummary:

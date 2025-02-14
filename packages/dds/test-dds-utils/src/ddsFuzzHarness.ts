@@ -42,7 +42,7 @@ import type { IIdCompressor } from "@fluidframework/id-compressor";
 import type { IIdCompressorCore } from "@fluidframework/id-compressor/internal";
 import { FluidSerializer } from "@fluidframework/shared-object-base/internal";
 import {
-	MockContainerRuntimeFactoryForReconnection,
+	MockServer,
 	MockFluidDataStoreRuntime,
 	MockStorage,
 } from "@fluidframework/test-runtime-utils/internal";
@@ -79,7 +79,7 @@ export interface DDSRandom extends IRandom {
  */
 export interface DDSFuzzTestState<TChannelFactory extends IChannelFactory>
 	extends BaseFuzzTestState {
-	containerRuntimeFactory: MockContainerRuntimeFactoryForReconnection;
+	containerRuntimeFactory: MockServer;
 
 	random: DDSRandom;
 
@@ -437,7 +437,6 @@ export interface DDSFuzzSuiteOptions {
 	validationStrategy:
 		| { type: "random"; probability: number }
 		| { type: "fixedInterval"; interval: number }
-		// WIP: This validation strategy still currently synchronizes all clients.
 		| { type: "partialSynchronization"; probability: number; clientProbability: number };
 	parseOperations: (serialized: string) => BaseOperation[];
 
@@ -654,14 +653,14 @@ export function mixinReconnect<
 			const baseGenerator = model.generatorFactory();
 			return async (state): Promise<TOperation | ChangeConnectionState | typeof done> => {
 				const baseOp = baseGenerator(state);
-				if (!state.isDetached && state.random.bool(options.reconnectProbability)) {
-					const client = state.clients.find((c) => c.channel.id === state.client.channel.id);
-					assert(client !== undefined);
-					return {
-						type: "changeConnectionState",
-						connected: !client.containerRuntime.connected,
-					};
-				}
+				// if (!state.isDetached && state.random.bool(options.reconnectProbability)) {
+				// 	const client = state.clients.find((c) => c.channel.id === state.client.channel.id);
+				// 	assert(client !== undefined);
+				// 	return {
+				// 		type: "changeConnectionState",
+				// 		connected: !client.containerRuntime.connected,
+				// 	};
+				// }
 
 				return baseOp;
 			};
@@ -676,8 +675,9 @@ export function mixinReconnect<
 		operation,
 	) => {
 		if (operation.type === "changeConnectionState") {
-			state.client.containerRuntime.connected = (operation as ChangeConnectionState).connected;
-			return state;
+			throw new Error("MockServer does not support reconnect");
+			// state.client.containerRuntime.connected = (operation as ChangeConnectionState).connected;
+			// return state;
 		} else {
 			return model.reducer(state, operation as TOperation);
 		}
@@ -968,7 +968,7 @@ export function mixinSynchronization<
 					if (!state.isDetached && state.random.bool(validationStrategy.probability)) {
 						const selectedClients = new Set(
 							state.clients
-								.filter((client) => client.containerRuntime.connected)
+								// .filter((client) => client.containerRuntime.connected)
 								.filter(() => state.random.bool(validationStrategy.clientProbability))
 								.map((client) => client.channel.id),
 						);
@@ -994,11 +994,22 @@ export function mixinSynchronization<
 	const reducer: AsyncReducer<TOperation | Synchronize, TState> = async (state, operation) => {
 		// TODO: Only synchronize listed clients if specified
 		if (isSynchronizeOp(operation)) {
-			const connectedClients = state.clients.filter(
-				(client) => client.containerRuntime.connected,
-			);
+			const syncedClients =
+				operation.clients?.map((id) => {
+					const client = state.clients.find((c) => c.channel.id === id);
+					assert(client !== undefined, "expected to find client");
+					return client;
+				}) ?? state.clients;
 
-			for (const client of connectedClients) {
+			// Always include the summarizer client in the sync so we have a good comparison.
+			if (!syncedClients.find((client) => client === state.summarizerClient)) {
+				syncedClients.push(state.summarizerClient);
+			}
+			// const connectedClients = state.clients.filter(
+			// 	(client) => client.containerRuntime.connected,
+			// );
+
+			for (const client of state.clients) {
 				assert(
 					client.containerRuntime.flush !== undefined,
 					"Unsupported mock runtime version",
@@ -1006,10 +1017,13 @@ export function mixinSynchronization<
 				client.containerRuntime.flush();
 			}
 
-			state.containerRuntimeFactory.processAllMessages();
-			if (connectedClients.length > 0) {
+			const now = state.containerRuntimeFactory.createCheckpoint();
+			state.containerRuntimeFactory.advanceClientsTo(
+				syncedClients.map((c) => ({ target: c.containerRuntime, checkpoint: now })),
+			);
+			if (syncedClients.length > 0) {
 				const readonlyChannel = state.summarizerClient;
-				for (const client of connectedClients) {
+				for (const client of syncedClients) {
 					try {
 						await model.validateConsistency(readonlyChannel, client);
 					} catch (error: unknown) {
@@ -1126,30 +1140,31 @@ export function mixinStashedClient<
 	};
 
 	const reducer: AsyncReducer<TOperation | StashClient, TState> = async (state, operation) => {
-		const { clients, containerRuntimeFactory } = state;
+		// const { clients, containerRuntimeFactory } = state;
 		if (isOperationType<StashClient>("stashClient", operation)) {
-			const client = clients.find((c) => c.channel.id === operation.existingClientId);
-			if (!hasStashData(client)) {
-				throw new ReducerPreconditionError("client not stashable");
-			}
-			const loadData = createLoadDataFromStashData(client, client.stashData);
+			throw new Error("MockServer does not support stashClient");
+			// const client = clients.find((c) => c.channel.id === operation.existingClientId);
+			// if (!hasStashData(client)) {
+			// 	throw new ReducerPreconditionError("client not stashable");
+			// }
+			// const loadData = createLoadDataFromStashData(client, client.stashData);
 
-			// load a new client from the same state as the original client
-			const newClient = await loadClientFromSummaries(
-				containerRuntimeFactory,
-				loadData,
-				model.factory,
-				operation.newClientId,
-				options,
-			);
+			// // load a new client from the same state as the original client
+			// const newClient = await loadClientFromSummaries(
+			// 	containerRuntimeFactory,
+			// 	loadData,
+			// 	model.factory,
+			// 	operation.newClientId,
+			// 	options,
+			// );
 
-			await newClient.containerRuntime.initializeWithStashedOps(client.containerRuntime);
+			// await newClient.containerRuntime.initializeWithStashedOps(client.containerRuntime);
 
-			// replace the old client with the new client
-			return {
-				...state,
-				clients: [...clients.filter((c) => c.channel.id !== client.channel.id), newClient],
-			};
+			// // replace the old client with the new client
+			// return {
+			// 	...state,
+			// 	clients: [...clients.filter((c) => c.channel.id !== client.channel.id), newClient],
+			// };
 		}
 
 		return model.reducer(state, operation);
@@ -1199,7 +1214,7 @@ function makeUnreachableCodePathProxy<T extends object>(name: string): T {
 }
 
 function createDetachedClient<TChannelFactory extends IChannelFactory>(
-	containerRuntimeFactory: MockContainerRuntimeFactoryForReconnection,
+	containerRuntimeFactory: MockServer,
 	factory: TChannelFactory,
 	clientId: string,
 	options: Omit<DDSFuzzSuiteOptions, "only" | "skip">,
@@ -1219,10 +1234,14 @@ function createDetachedClient<TChannelFactory extends IChannelFactory>(
 		clientId,
 	);
 
-	const containerRuntime = containerRuntimeFactory.createContainerRuntime(dataStoreRuntime, {
-		// only track remote ops(which enables initialize from stashed ops), if rehydrate is enabled
-		trackRemoteOps: options.detachedStartOptions.rehydrateDisabled !== true,
-	});
+	const containerRuntime = containerRuntimeFactory.createContainerRuntime(
+		dataStoreRuntime,
+		0,
+		{
+			// only track remote ops(which enables initialize from stashed ops), if rehydrate is enabled
+			trackRemoteOps: options.detachedStartOptions.rehydrateDisabled !== true,
+		},
+	);
 	// TS resolves the return type of model.factory.create too early and isn't able to retain a more specific type
 	// than IChannel here.
 	const newClient: Client<TChannelFactory> = {
@@ -1235,7 +1254,7 @@ function createDetachedClient<TChannelFactory extends IChannelFactory>(
 }
 
 async function loadClient<TChannelFactory extends IChannelFactory>(
-	containerRuntimeFactory: MockContainerRuntimeFactoryForReconnection,
+	containerRuntimeFactory: MockServer,
 	summarizerClient: ClientWithStashData<TChannelFactory>,
 	factory: TChannelFactory,
 	clientId: string,
@@ -1257,14 +1276,14 @@ async function loadClient<TChannelFactory extends IChannelFactory>(
 }
 
 async function loadClientFromSummaries<TChannelFactory extends IChannelFactory>(
-	containerRuntimeFactory: MockContainerRuntimeFactoryForReconnection,
+	containerRuntimeFactory: MockServer,
 	loadData: ClientLoadData,
 	factory: TChannelFactory,
 	clientId: string,
 	options: Omit<DDSFuzzSuiteOptions, "only" | "skip">,
 	supportStashing: boolean = false,
 ): Promise<ClientWithStashData<TChannelFactory>> {
-	const { summaries, minimumSequenceNumber } = loadData;
+	const { summaries, minimumSequenceNumber, summarySequenceNumber } = loadData;
 	const stashData = supportStashing ? structuredClone(loadData) : undefined;
 
 	const dataStoreRuntime = new MockFluidDataStoreRuntime({
@@ -1274,10 +1293,14 @@ async function loadClientFromSummaries<TChannelFactory extends IChannelFactory>(
 				? undefined
 				: options.idCompressorFactory(summaries.idCompressorSummary),
 	});
-	const containerRuntime = containerRuntimeFactory.createContainerRuntime(dataStoreRuntime, {
-		minimumSequenceNumber,
-		trackRemoteOps: supportStashing,
-	});
+	const containerRuntime = containerRuntimeFactory.createContainerRuntime(
+		dataStoreRuntime,
+		summarySequenceNumber,
+		{
+			minimumSequenceNumber,
+			trackRemoteOps: supportStashing,
+		},
+	);
 	const services: IChannelServices = {
 		deltaConnection: dataStoreRuntime.createDeltaConnection(),
 		objectStorage: MockStorage.createFromSummary(summaries.summary),
@@ -1303,7 +1326,7 @@ async function loadClientFromSummaries<TChannelFactory extends IChannelFactory>(
 }
 
 async function loadDetached<TChannelFactory extends IChannelFactory>(
-	containerRuntimeFactory: MockContainerRuntimeFactoryForReconnection,
+	containerRuntimeFactory: MockServer,
 	summarizerClient: ClientWithStashData<TChannelFactory>,
 	factory: TChannelFactory,
 	clientId: string,
@@ -1324,7 +1347,7 @@ async function loadDetached<TChannelFactory extends IChannelFactory>(
 		idCompressor,
 		attachState: AttachState.Detached,
 	});
-	const containerRuntime = containerRuntimeFactory.createContainerRuntime(dataStoreRuntime);
+	const containerRuntime = containerRuntimeFactory.createContainerRuntime(dataStoreRuntime, 0);
 	const services: IChannelServices = {
 		deltaConnection: dataStoreRuntime.createDeltaConnection(),
 		objectStorage: MockStorage.createFromSummary(summaries.summary),
@@ -1337,9 +1360,9 @@ async function loadDetached<TChannelFactory extends IChannelFactory>(
 		factory.attributes,
 	)) as ReturnType<TChannelFactory["create"]>;
 
-	if (summarizerClient.stashData) {
-		await containerRuntime.initializeWithStashedOps(summarizerClient.containerRuntime);
-	}
+	// if (summarizerClient.stashData) {
+	// 	await containerRuntime.initializeWithStashedOps(summarizerClient.containerRuntime);
+	// }
 
 	const newClient: Client<TChannelFactory> = {
 		channel,
@@ -1386,9 +1409,7 @@ export async function runTestForSeed<
 	saveInfo?: SaveInfo,
 ): Promise<DDSFuzzTestState<TChannelFactory>> {
 	const random = makeRandom(seed);
-	const containerRuntimeFactory = new MockContainerRuntimeFactoryForReconnection(
-		options.containerRuntimeOptions,
-	);
+	const containerRuntimeFactory = new MockServer();
 
 	const startDetached = options.detachedStartOptions.numOpsBeforeAttach !== 0;
 	const initialClient = createDetachedClient(

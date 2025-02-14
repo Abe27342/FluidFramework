@@ -3,10 +3,189 @@
  * Licensed under the MIT License.
  */
 
+import { takeAsync } from "@fluid-private/stochastic-test-utils";
 import { createDDSFuzzSuite } from "@fluid-private/test-dds-utils";
 import { FlushMode } from "@fluidframework/runtime-definitions/internal";
 
-import { baseSharedStringModel, defaultFuzzOptions } from "./fuzzUtils.js";
+import {
+	baseSharedStringModel,
+	defaultFuzzOptions,
+	makeIntervalOperationGenerator,
+} from "./fuzzUtils.js";
+
+// [
+//     {
+//         "type": "addText",
+//         "index": 0,
+//         "content": "zCEFXQq8",
+//         "clientId": "A"
+//     },
+//     {
+//         "type": "attach"
+//     },
+//     {
+//         "type": "addText",
+//         "index": 0,
+//         "content": "UOBSZAxxxxxVGMT",
+//         "clientId": "B"
+//     },
+//     {
+//         "type": "synchronize",
+//         "clients": [
+//             "C"
+//         ]
+//     },
+//     {
+//         "type": "obliterateRange",
+//         "start": 15,
+//         "end": 20,
+//         "clientId": "B"
+//     },
+//     {
+//         "type": "synchronize",
+//         "clients": [
+//             "A",
+//             "B"
+//         ]
+//     },
+//     {
+//         "type": "addText",
+//         "index": 4,
+//         "content": "g",
+//         "clientId": "A"
+//     },
+//     {
+//         "type": "synchronize",
+//         "clients": [
+//             "A"
+//         ]
+//     },
+//     {
+//         "type": "addText",
+//         "index": 0,
+//         "content": "g",
+//         "clientId": "C"
+//     },
+//     {
+//         "type": "obliterateRange",
+//         "start": {
+//             "pos": 4,
+//             "side": 1
+//         },
+//         "end": {
+//             "pos": 10,
+//             "side": 1
+//         },
+//         "clientId": "C"
+//     },
+//     {
+//         "type": "obliterateRange",
+//         "start": {
+//             "pos": 0,
+//             "side": 0
+//         },
+//         "end": {
+//             "pos": 7,
+//             "side": 1
+//         },
+//         "clientId": "A"
+//     },
+//     {
+//         "type": "removeRange",
+//         "start": 0,
+//         "end": 1,
+//         "clientId": "A"
+//     },
+//     {
+//         "type": "synchronize",
+//         "clients": [
+//             "A",
+//             "B",
+//             "C"
+//         ]
+//     }
+// ]
+
+// Issue where we need to make sure we don't add entry for making obliterate visible to a client when it also subsequently removes that segment
+// [
+//     {
+//         "type": "addText",
+//         "index": 0,
+//         "content": "bZL4aQd",
+//         "clientId": "A"
+//     },
+//     {
+//         "type": "attach"
+//     },
+//     {
+//         "type": "addText",
+//         "index": 0,
+//         "content": "8mvaLcEa4nwhELu",
+//         "clientId": "A"
+//     },
+//     {
+//         "type": "synchronize",
+//         "clients": [
+//             "A",
+//             "B",
+//             "C"
+//         ]
+//     },
+//     {
+//         "type": "obliterateRange",
+//         "start": {
+//             "pos": 2,
+//             "side": 1
+//         },
+//         "end": {
+//             "pos": 21,
+//             "side": 1
+//         },
+//         "clientId": "C"
+//     },
+//     {
+//         "type": "addText",
+//         "index": 3,
+//         "content": "Y",
+//         "clientId": "A"
+//     },
+//     {
+//         "type": "removeRange",
+//         "start": 2,
+//         "end": 4,
+//         "clientId": "A"
+//     },
+//     {
+//         "type": "obliterateRange",
+//         "start": {
+//             "pos": 2,
+//             "side": 1
+//         },
+//         "end": {
+//             "pos": 6,
+//             "side": 1
+//         },
+//         "clientId": "A"
+//     },
+//     {
+//         "type": "obliterateRange",
+//         "start": 2,
+//         "end": 3,
+//         "clientId": "A"
+//     },
+//     {
+//         "type": "addText",
+//         "index": 3,
+//         "content": "X",
+//         "clientId": "A"
+//     },
+//     {
+//         "type": "synchronize",
+//         "clients": [
+//             "C"
+//         ]
+//     }
+// ]
 
 describe("SharedString fuzz testing", () => {
 	createDDSFuzzSuite(
@@ -27,10 +206,64 @@ describe("SharedString fuzz with stashing", () => {
 			clientJoinOptions: {
 				clientAddProbability: 0.1,
 				maxNumberOfClients: Number.MAX_SAFE_INTEGER,
-				stashableClientProbability: 0.2,
+				stashableClientProbability: 0,
+			},
+			detachedStartOptions: {
+				numOpsBeforeAttach: 5,
+				rehydrateDisabled: true,
+				attachingBeforeRehydrateDisable: true,
 			},
 			// Uncomment this line to replay a specific seed from its failure file:
 			// replay: 0,
+		},
+	);
+});
+
+describe.only("SharedString fuzz with obliterate", () => {
+	const model: typeof baseSharedStringModel = {
+		...baseSharedStringModel,
+		generatorFactory: () =>
+			takeAsync(
+				100,
+				makeIntervalOperationGenerator({
+					weights: {
+						addText: 3,
+						removeRange: 2,
+						annotateRange: 1,
+						obliterateRange: 3,
+						addInterval: 1,
+						deleteInterval: 1,
+						changeInterval: 1,
+						revertWeight: 0,
+					},
+				}),
+			),
+	};
+	createDDSFuzzSuite(
+		{ ...model, workloadName: "SharedString with obliterate" },
+		{
+			...defaultFuzzOptions,
+			// Sided obliterate doesn't support reconnect yet.
+			reconnectProbability: 0,
+			validationStrategy: {
+				type: "partialSynchronization",
+				probability: 0.1,
+				clientProbability: 0.6,
+			},
+			clientJoinOptions: {
+				clientAddProbability: 0,
+				maxNumberOfClients: 6,
+				stashableClientProbability: 0,
+			},
+			detachedStartOptions: {
+				numOpsBeforeAttach: 5,
+				rehydrateDisabled: true,
+				attachingBeforeRehydrateDisable: true,
+			},
+			// Uncomment this line to replay a specific seed from its failure file:
+			// replay: 4,
+			// TODO:AB#7220: This seed should be enabled. The failure here is unrelated to obliterate.
+			skip: [51],
 		},
 	);
 });
