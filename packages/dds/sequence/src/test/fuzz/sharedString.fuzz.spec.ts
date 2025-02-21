@@ -219,7 +219,7 @@ describe("SharedString fuzz with stashing", () => {
 	);
 });
 
-describe.only("SharedString fuzz with obliterate", () => {
+describe("SharedString fuzz with obliterate", () => {
 	const model: typeof baseSharedStringModel = {
 		...baseSharedStringModel,
 		generatorFactory: () =>
