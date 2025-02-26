@@ -33,6 +33,58 @@ import {
 import { SharedStringFactory, type SharedString } from "../sequenceFactory.js";
 import { SharedStringClass, getTextAndMarkers } from "../sharedString.js";
 
+// Problem with below test case is the op transformation is scuffed; when client E loads from
+// summary, it thinks the j segment is after the U segment even though both are in the collab window,
+// and as a result it inserts D in the wrong place.
+// [
+//     {
+//         "type": "addText",
+//         "index": 0,
+//         "content": "U",
+//         "clientId": "A"
+//     },
+//     {
+//         "type": "attach"
+//     },
+//     {
+//         "type": "removeRange",
+//         "start": 0,
+//         "end": 1,
+//         "clientId": "A"
+//     },
+//     {
+//         "type": "addText",
+//         "index": 1,
+//         "content": "j",
+//         "clientId": "B"
+//     },
+//     {
+//         "type": "synchronize",
+//         "clients": [
+//             "A"
+//         ]
+//     },
+//     {
+//         "type": "addText",
+//         "index": 1,
+//         "content": "D",
+//         "clientId": "B"
+//     },
+//     {
+//         "type": "addClient",
+//         "addedClientId": "E",
+//         "canBeStashed": false
+//     },
+//     {
+//         "type": "synchronize",
+//         "clients": [
+//             "A",
+//             "B",
+//             "E"
+//         ]
+//     }
+// ]
+
 describe("SharedString", () => {
 	let sharedString: SharedString;
 	let dataStoreRuntime1: MockFluidDataStoreRuntime;

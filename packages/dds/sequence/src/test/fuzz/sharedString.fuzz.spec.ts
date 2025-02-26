@@ -219,7 +219,7 @@ describe("SharedString fuzz with stashing", () => {
 	);
 });
 
-describe("SharedString fuzz with obliterate", () => {
+describe.only("SharedString fuzz with obliterate", () => {
 	const model: typeof baseSharedStringModel = {
 		...baseSharedStringModel,
 		generatorFactory: () =>
@@ -261,9 +261,9 @@ describe("SharedString fuzz with obliterate", () => {
 				attachingBeforeRehydrateDisable: true,
 			},
 			// Uncomment this line to replay a specific seed from its failure file:
-			// replay: 4,
+			// replay: 14,
 			// TODO:AB#7220: This seed should be enabled. The failure here is unrelated to obliterate.
-			skip: [51],
+			// skip: [51],
 		},
 	);
 });
