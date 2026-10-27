@@ -52,7 +52,7 @@ import {
 	flexTreeSlot,
 } from "./flexTreeTypes.js";
 import { LazyEntity } from "./lazyEntity.js";
-import { type LazyTreeNode, getOrCreateHydratedFlexTreeNode } from "./lazyNode.js";
+import { getOrCreateHydratedFlexTreeNode } from "./lazyNode.js";
 import { indexForAt, treeStatusFromAnchorCache } from "./utilities.js";
 
 /**
@@ -69,7 +69,7 @@ import { indexForAt, treeStatusFromAnchorCache } from "./utilities.js";
  *
  * Despite these limitations, this cache provides a large performance win in some common cases (over 10x), especially with how simple tree requests far more field objects than necessary currently.
  */
-const fieldCache: WeakMap<LazyTreeNode, Map<FieldKey, FlexTreeField>> = new WeakMap();
+const fieldCache: WeakMap<HydratedFlexTreeNode, Map<FieldKey, FlexTreeField>> = new WeakMap();
 
 export function makeField(
 	context: Context,
@@ -254,6 +254,11 @@ export abstract class LazyField extends LazyEntity<FieldAnchor> implements FlexT
 }
 
 export class LazySequence extends LazyField implements FlexTreeSequenceField {
+	/** Inserts already validated content without creating MapTrees or public node wrappers. */
+	public insertCursor(index: number, content: ITreeCursorSynchronous): void {
+		this.sequenceEditor().insert(index, content);
+	}
+
 	public at(index: number): FlexTreeUnknownUnboxed | undefined {
 		const finalIndex = indexForAt(index, this.length);
 
