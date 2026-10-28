@@ -17,6 +17,7 @@ import {
 	type TreeNodeSchemaIdentifier,
 	type Value,
 	forEachNode,
+	tryGetChunk,
 } from "../../../core/index.js";
 import {
 	EncodedIdType,
@@ -25,6 +26,7 @@ import {
 	type EncodedId,
 	type IdEncodingContext,
 } from "../../../util/index.js";
+import { StringChunk, isCharacter, joinsSurrogates } from "../stringChunk.js";
 
 import type { Counter, DeduplicationTable } from "./chunkCodecUtilities.js";
 import {
@@ -43,7 +45,7 @@ import {
 	type EncodedFieldBatchAnyVersion,
 	type EncodedNestedArrayShape,
 	type EncodedValueShape,
-	type FieldBatchFormatVersion,
+	FieldBatchFormatVersion,
 	SpecialField,
 	supportsIncrementalEncoding,
 } from "./format/index.js";
@@ -259,6 +261,8 @@ export const anyFieldEncoder: FieldEncoder = {
 			cursor.enterNode(0);
 			anyNodeEncoder.encodeNode(cursor, context, outputBuffer);
 			cursor.exitNode();
+		} else if (context.version === FieldBatchFormatVersion.vTextExperimental) {
+			encodeStringRunField(cursor, context, outputBuffer);
 		} else {
 			// TODO: more efficient encoding for common cases.
 			// Could try to find more specific shape compatible with all children than `anyNodeEncoder`.
@@ -270,6 +274,92 @@ export const anyFieldEncoder: FieldEncoder = {
 
 	shape: AnyShape.instance,
 };
+
+function encodeStringRunField(
+	cursor: ITreeCursorSynchronous,
+	context: EncoderContext,
+	outputBuffer: BufferFormat,
+): void {
+	const length = cursor.getFieldLength();
+	const buffer: BufferFormat = [];
+	let entries = 0;
+	cursor.firstNode();
+	while (cursor.mode === CursorLocationType.Nodes) {
+		if (!tryEncodeStringRun(cursor, length, context, buffer)) {
+			anyNodeEncoder.encodeNode(cursor, context, buffer);
+			cursor.nextNode();
+		}
+		entries++;
+	}
+	if (entries === 1) {
+		// A single run describes the entire field without an array wrapper.
+		outputBuffer.push(...buffer);
+	} else {
+		outputBuffer.push(context.nestedArrayEncoder(anyNodeEncoder).shape, buffer);
+	}
+}
+
+/**
+ * Encodes and advances past a run, or leaves the cursor unchanged if the node is not eligible.
+ */
+function tryEncodeStringRun(
+	cursor: ITreeCursorSynchronous,
+	fieldLength: number,
+	context: EncoderContext,
+	outputBuffer: BufferFormat,
+): boolean {
+	const type = cursor.type;
+	let spans: string[] | undefined;
+	let previous: string | undefined;
+	while (cursor.mode === CursorLocationType.Nodes && cursor.type === type) {
+		const chunk = tryGetChunk(cursor);
+		let text: string;
+		let count: number;
+		if (chunk instanceof StringChunk) {
+			const start = cursor.fieldIndex - cursor.chunkStart;
+			count = Math.min(chunk.topLevelLength - start, fieldLength - cursor.fieldIndex);
+			const piece = chunk.slice(start, start + count);
+			text = piece.text;
+			piece.referenceRemoved();
+		} else {
+			const value = cursor.value;
+			if (!isCharacter(value)) {
+				break;
+			}
+			if (cursor.firstField()) {
+				cursor.exitField();
+				break;
+			}
+			text = value;
+			count = 1;
+		}
+		if (previous !== undefined && joinsSurrogates(previous, text)) {
+			break;
+		}
+		(spans ??= []).push(text);
+		previous = text;
+		cursor.seekNodes(count);
+	}
+	if (spans === undefined) {
+		return false;
+	}
+	outputBuffer.push(context.stringRunShape(type), spans.join(""));
+	return true;
+}
+
+class StringRunShape extends ShapeGeneric<EncodedChunkShape> {
+	public constructor(private readonly type: TreeNodeSchemaIdentifier) {
+		super();
+	}
+
+	public encodeShape(identifiers: DeduplicationTable<string>): EncodedChunkShape {
+		return { g: { type: identifiers.valueToIndex.get(this.type) ?? this.type } };
+	}
+
+	public countReferencedShapesAndIdentifiers(identifiers: Counter<string>): void {
+		identifiers.add(this.type);
+	}
+}
 
 /**
  * Encodes a chunk using {@link EncodedInlineArrayShape}.
@@ -532,6 +622,7 @@ export class EncoderContext
 	private readonly nodeEncodersFromSchema: Map<TreeNodeSchemaIdentifier, NodeEncoder> =
 		new Map();
 	private readonly nestedArrayEncoders: Map<NodeEncoder, NestedArrayEncoder> = new Map();
+	private readonly stringRunShapes = new Map<TreeNodeSchemaIdentifier, StringRunShape>();
 	public constructor(
 		private readonly nodeEncoderFromPolicy: NodeEncoderPolicy,
 		private readonly fieldEncoderFromPolicy: FieldEncoderPolicy,
@@ -582,6 +673,10 @@ export class EncoderContext
 
 	public nestedArrayEncoder(inner: NodeEncoder): NestedArrayEncoder {
 		return getOrCreate(this.nestedArrayEncoders, inner, () => new NestedArrayEncoder(inner));
+	}
+
+	public stringRunShape(type: TreeNodeSchemaIdentifier): Shape {
+		return getOrCreate(this.stringRunShapes, type, () => new StringRunShape(type));
 	}
 }
 

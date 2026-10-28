@@ -38,7 +38,13 @@ import { isStableNodeIdentifier } from "../node-identifier/index.js";
 import { BasicChunk } from "./basicChunk.js";
 import type { IncrementalEncodingPolicy } from "./codec/index.js";
 import { SequenceChunk } from "./sequenceChunk.js";
-import { StringChunk, StringTreeChunk, stringBufferSize } from "./stringChunk.js";
+import {
+	StringChunk,
+	StringTreeChunk,
+	stringBufferSize,
+	isCharacter,
+	joinsSurrogates,
+} from "./stringChunk.js";
 import { type FieldShape, TreeShape, UniformChunk } from "./uniformChunk.js";
 
 export interface Disposable {
@@ -463,6 +469,7 @@ export const defaultChunkPolicy: ChunkPolicy = {
 };
 
 export const basicOnlyChunkPolicy: ChunkPolicy = {
+	stringChunks: false,
 	sequenceChunkSplitThreshold: Number.POSITIVE_INFINITY,
 	sequenceChunkInlineThreshold: Number.POSITIVE_INFINITY,
 	uniformChunkNodeCount: 0,
@@ -474,7 +481,11 @@ export const basicOnlyChunkPolicy: ChunkPolicy = {
  * Policy for how to chunk a tree.
  */
 export interface ChunkPolicy {
-	/** Enables the experimental string-leaf piece representation. */
+	/**
+	 * Enables the experimental string-leaf piece representation.
+	 * If omitted, preserves existing pieces without packing other content.
+	 * If false, converts pieces to the policy's other representations.
+	 */
 	readonly stringChunks?: boolean;
 	/**
 	 * Group sequences longer than this into into sequence chunks of this length or less.
@@ -567,7 +578,7 @@ export function chunkRange(
 	while (remaining > 0) {
 		assert(cursor.mode === CursorLocationType.Nodes, 0x57f /* should be in nodes */);
 		const source = tryGetChunk(cursor);
-		if (source instanceof StringChunk && chunkCompressor.policy.stringChunks === true) {
+		if (source instanceof StringChunk && chunkCompressor.policy.stringChunks !== false) {
 			const offset = cursor.fieldIndex - cursor.chunkStart;
 			const count = Math.min(remaining, source.topLevelLength - offset);
 			output.push(source.slice(offset, offset + count));
@@ -591,7 +602,7 @@ export function chunkRange(
 						isCharacter(cursor.value)))
 			) &&
 			!(
-				chunkCompressor.policy.stringChunks !== true &&
+				chunkCompressor.policy.stringChunks === false &&
 				(source instanceof StringChunk || source instanceof StringTreeChunk)
 			)
 		) {
@@ -838,19 +849,6 @@ export function coalesceUniformChunks(
 	if (mutated) {
 		replaceArrayRange(chunks, rangeStart, rangeEnd, result);
 	}
-}
-
-function isCharacter(value: Value): value is string {
-	return (
-		typeof value === "string" &&
-		(value.length === 1 || (value.length === 2 && (value.codePointAt(0) ?? 0) > 0xffff))
-	);
-}
-
-function joinsSurrogates(left: string, right: string): boolean {
-	const high = left.codePointAt(left.length - 1) ?? oob();
-	const low = right.codePointAt(0) ?? oob();
-	return high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff;
 }
 
 /**

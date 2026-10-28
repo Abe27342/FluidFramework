@@ -19,6 +19,7 @@ export { EncodedIncrementalChunkShape, EncodedChunkShapeV2 } from "./formatV2.js
 export {
 	EncodedChunkShapeVTextExperimental,
 	EncodedSpecializedNodeShape,
+	EncodedStringRunShape,
 } from "./formatVText.js";
 export {
 	FieldBatchFormatVersion,
@@ -27,6 +28,7 @@ export {
 	EncodedFieldBatchVTextExperimental,
 	supportsIncrementalEncoding,
 	type EncodedFieldBatchAnyVersion,
+	type EncodedFieldBatchWithIncremental,
 	type EncodedFieldBatchV1AndV2,
 	type EncodedChunkShape,
 } from "./versions.js";

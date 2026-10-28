@@ -57,6 +57,7 @@ import {
 	type EncodedChunkShapeV1,
 	EncodedFieldBatchV1,
 	EncodedFieldBatchV2,
+	EncodedFieldBatchVTextExperimental,
 	type EncodedFieldBatchAnyVersion,
 	type EncodedValueShape,
 	FieldBatchFormatVersion,
@@ -115,8 +116,13 @@ function makeFieldBatchCodec(
 	FieldBatchDecodingContext
 > {
 	const builder = VersionDispatchingCodecBuilder.build("TestCompressedFieldBatch", [
+		...(typeof version === "string"
+			? fieldBatchCodecBuilder.registry.filter(
+					(entry) => entry.formatVersion === FieldBatchFormatVersion.v1,
+				)
+			: []),
 		{
-			minVersionForCollab: lowestMinVersionForCollab,
+			minVersionForCollab: typeof version === "number" ? lowestMinVersionForCollab : undefined,
 			formatVersion: version,
 			codec: {
 				encode: (
@@ -138,7 +144,12 @@ function makeFieldBatchCodec(
 			},
 		},
 	]);
-	return builder.build({ ...options, minVersionForCollab: lowestMinVersionForCollab });
+	return builder.build({
+		...options,
+		minVersionForCollab: lowestMinVersionForCollab,
+		writeVersionOverrides: new Map([[builder.name, version]]),
+		allowPossiblyIncompatibleWriteVersionOverrides: true,
+	});
 }
 
 const fieldBatchVersion = brand<FieldBatchFormatVersion>(FieldBatchFormatVersion.v2);
@@ -168,7 +179,11 @@ describe("compressedEncode", () => {
 					const codec = makeFieldBatchCodec(
 						{ jsonValidator: FormatValidatorBasic },
 						context,
-						[EncodedFieldBatchV1, EncodedFieldBatchV2][version - 1],
+						version === FieldBatchFormatVersion.v1
+							? EncodedFieldBatchV1
+							: version === FieldBatchFormatVersion.v2
+								? EncodedFieldBatchV2
+								: EncodedFieldBatchVTextExperimental,
 						version,
 					);
 					const { encode, decode: decodeContext } = makeTestFieldBatchContexts({

@@ -16,6 +16,7 @@ import {
 	type TreeChunk,
 	type TreeNodeSchemaIdentifier,
 	type UpPath,
+	type Value,
 } from "../../core/index.js";
 import { ReferenceCountedBase } from "../../util/index.js";
 import { SynchronousCursor, prefixFieldPath, prefixPath } from "../treeCursorUtils.js";
@@ -62,6 +63,19 @@ class StringBuffer {
 
 function characterWidth(text: string, offset: number): number {
 	return (text.codePointAt(offset) ?? oob()) > 0xffff ? 2 : 1;
+}
+
+export function isCharacter(value: Value): value is string {
+	return (
+		typeof value === "string" &&
+		(value.length === 1 || (value.length === 2 && (value.codePointAt(0) ?? 0) > 0xffff))
+	);
+}
+
+export function joinsSurrogates(left: string, right: string): boolean {
+	const high = left.codePointAt(left.length - 1) ?? oob();
+	const low = right.codePointAt(0) ?? oob();
+	return high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff;
 }
 
 /** A piece exposing code points as separate string leaves, without storing per-leaf values. */

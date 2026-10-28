@@ -28,6 +28,7 @@ import {
 	type KeyedFieldEncoder,
 	type NodeEncodeBuilder,
 	anyNodeEncoder,
+	anyFieldEncoder,
 	asFieldEncoder,
 	compressedEncode,
 	incrementalFieldEncoder,
@@ -37,6 +38,7 @@ import {
 	type EncodedFieldBatchV1,
 	type EncodedFieldBatchAnyVersion,
 	type EncodedFieldBatchV2,
+	type EncodedFieldBatchVTextExperimental,
 	type EncodedValueShape,
 	FieldBatchFormatVersion,
 	SpecialField,
@@ -90,6 +92,25 @@ export function schemaCompressedEncodeV2(
 		idCompressor,
 		incrementalEncoder,
 		brand(FieldBatchFormatVersion.v2),
+		isSummary,
+	);
+}
+
+export function schemaCompressedEncodeVText(
+	schema: StoredSchemaCollection,
+	policy: SchemaPolicy,
+	fieldBatch: FieldBatch,
+	idCompressor: IIdCompressor,
+	incrementalEncoder: IncrementalEncoder | undefined,
+	isSummary: boolean,
+): EncodedFieldBatchVTextExperimental {
+	return schemaCompressedEncode(
+		schema,
+		policy,
+		fieldBatch,
+		idCompressor,
+		incrementalEncoder,
+		FieldBatchFormatVersion.vTextExperimental,
 		isSummary,
 	);
 }
@@ -177,6 +198,18 @@ export function getFieldEncoder(
 		}
 		return asFieldEncoder(nodeEncoder);
 	} else {
+		if (
+			context.version === FieldBatchFormatVersion.vTextExperimental &&
+			kind.multiplicity === Multiplicity.Sequence
+		) {
+			const schema = type === undefined ? undefined : storedSchema.nodeSchema.get(type);
+			if (
+				type === undefined ||
+				(schema instanceof LeafNodeStoredSchema && schema.leafValue === ValueSchema.String)
+			) {
+				return anyFieldEncoder;
+			}
+		}
 		return context.nestedArrayEncoder(nodeEncoder);
 	}
 }

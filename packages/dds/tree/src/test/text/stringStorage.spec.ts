@@ -5,6 +5,7 @@
 
 import { strict as assert } from "node:assert";
 import { asAlpha } from "../../api.js";
+import { SummaryType } from "@fluidframework/driver-definitions";
 import { convertSummaryTreeToITree } from "@fluidframework/runtime-utils/internal";
 import {
 	MockFluidDataStoreRuntime,
@@ -23,9 +24,16 @@ import { ChunkedForest } from "../../feature-libraries/chunked-forest/chunkedFor
 import { StringChunk } from "../../feature-libraries/chunked-forest/stringChunk.js";
 // eslint-disable-next-line import-x/no-internal-modules
 import { ForestTypeStringPrototype } from "../../shared-tree/forestTypeStringPrototype.js";
+// eslint-disable-next-line import-x/no-internal-modules
+import { forestSummaryKey } from "../../feature-libraries/forest-summary/summaryFormatCommon.js";
+// eslint-disable-next-line import-x/no-internal-modules
+import { summaryContentBlobKey } from "../../feature-libraries/forest-summary/summaryFormatV3.js";
+// eslint-disable-next-line import-x/no-internal-modules
+import { summarizablesTreeKey } from "../../shared-tree-core/summaryTypes.js";
 import {
 	createIndependentTreeAlpha,
 	ForestTypeReference,
+	ForestTypeOptimized,
 	TreeAlpha,
 } from "../../shared-tree/index.js";
 import {
@@ -38,10 +46,22 @@ import { UnhydratedFlexTreeNode } from "../../simple-tree/core/unhydratedFlexTre
 // eslint-disable-next-line import-x/no-internal-modules
 import { plainTextFromString } from "../../text/textDomain.js";
 import { PlainText } from "../../text/index.js";
-import { FluidClientVersion } from "../../codec/index.js";
+import { FluidClientVersion, type CodecWriteOptions } from "../../codec/index.js";
+import {
+	FieldBatchFormatVersion,
+	fieldBatchCodecBuilder,
+	defaultSchemaPolicy,
+	TreeCompressionStrategy,
+} from "../../feature-libraries/index.js";
+import { FormatValidatorBasic } from "../../external-utilities/index.js";
 import { ajvValidator } from "../codec/index.js";
-import { createTestUndoRedoStacks, TestTreeProviderLite } from "../utils.js";
+import {
+	createTestUndoRedoStacks,
+	TestTreeProviderLite,
+	makeTestFieldBatchContexts,
+} from "../utils.js";
 import { configuredSharedTree } from "../../treeFactory.js";
+import type { JsonCompatible } from "../../util/index.js";
 
 function createView(forest = ForestTypeStringPrototype) {
 	const view = createIndependentTreeAlpha({ forest }).viewWith(
@@ -76,6 +96,132 @@ function pieces(root: PlainText.Tree): StringChunk[] {
 }
 
 describe("PlainText string storage prototype", () => {
+	describe("experimental string-run messages and summaries", () => {
+		const codecOptions: CodecWriteOptions = {
+			jsonValidator: FormatValidatorBasic,
+			minVersionForCollab: FluidClientVersion.v2_74,
+			writeVersionOverrides: new Map([
+				[fieldBatchCodecBuilder.name, FieldBatchFormatVersion.vTextExperimental],
+			]),
+			allowPossiblyIncompatibleWriteVersionOverrides: true,
+		};
+		for (const [name, forest] of [
+			["packed", ForestTypeStringPrototype],
+			["optimized", ForestTypeOptimized],
+			["reference", ForestTypeReference],
+		] as const) {
+			it(`round trips a 4000-character insertion through ${name} messages and a summary`, async () => {
+				const factory = configuredSharedTree({ forest, ...codecOptions }).getFactory();
+				const provider = new TestTreeProviderLite(2, factory);
+				const [source, remote] = provider.trees;
+				assert(source !== undefined && remote !== undefined);
+				const config = new TreeViewConfiguration({ schema: PlainText.Tree });
+				const localView = source.viewWith(config);
+				localView.initialize(PlainText.Tree.fromString(""));
+				provider.synchronizeMessages();
+				const remoteView = remote.viewWith(config);
+				const history = createTestUndoRedoStacks(asAlpha(localView).events);
+				const text = "ab\u{1F600}c".repeat(1000);
+				localView.root.insertAt(0, text);
+				let message = provider.peekNextMessage();
+				while (
+					message?.type === "op" &&
+					(message.contents as { type?: string }).type === "idAllocation"
+				) {
+					provider.synchronizeMessages({ count: 1 });
+					message = provider.peekNextMessage();
+				}
+				assert(message !== undefined);
+				const encoded = JSON.stringify(message.contents);
+				assert(encoded.includes(JSON.stringify(text)), "The op must contain one text string");
+				assert(encoded.includes('"version":"text"'));
+				provider.synchronizeMessages();
+				assert.equal(remoteView.root.fullString(), text);
+				assert.equal(remoteView.root.characterCount(), 4000);
+				if (forest === ForestTypeStringPrototype) {
+					assert(pieces(remoteView.root).length < 10, "Remote text must remain packed");
+				}
+
+				const undo = history.undoStack.pop();
+				assert(undo !== undefined);
+				undo.revert();
+				provider.synchronizeMessages();
+				assert.equal(remoteView.root.characterCount(), 0);
+				const redo = history.redoStack.pop();
+				assert(redo !== undefined);
+				redo.revert();
+				provider.synchronizeMessages();
+				assert.equal(remoteView.root.fullString(), text);
+
+				const summary = source.getAttachSummary(true).summary;
+				const indexes = summary.tree[summarizablesTreeKey];
+				assert(indexes?.type === SummaryType.Tree);
+				const forestSummary = indexes.tree[forestSummaryKey];
+				assert(forestSummary?.type === SummaryType.Tree);
+				const forestBlob = forestSummary.tree[summaryContentBlobKey];
+				assert(
+					forestBlob?.type === SummaryType.Blob && typeof forestBlob.content === "string",
+				);
+				assert(
+					forestBlob.content.includes(JSON.stringify(text)),
+					"The forest must encode a text run",
+				);
+				const loaded = await factory.load(
+					new MockFluidDataStoreRuntime({ idCompressor: provider.getCompressor(source) }),
+					source.id,
+					{
+						deltaConnection: new MockDeltaConnection(
+							() => 0,
+							() => {},
+						),
+						objectStorage: new MockStorage(convertSummaryTreeToITree(summary)),
+					},
+					factory.attributes,
+				);
+				const loadedView = loaded.viewWith(config);
+				assert.deepEqual(loadedView.root.charactersCopy(), localView.root.charactersCopy());
+				if (forest === ForestTypeStringPrototype) {
+					assert(pieces(loadedView.root).length < 10, "Loaded text must remain packed");
+				}
+
+				localView.root.insertAt(1, "L");
+				remoteView.root.insertAt(1, "R");
+				provider.synchronizeMessages();
+				assert.deepEqual(localView.root.charactersCopy(), remoteView.root.charactersCopy());
+				assert.equal(localView.root.characterCount(), 4002);
+				history.unsubscribe();
+				loadedView.dispose();
+				remoteView.dispose();
+				localView.dispose();
+			});
+		}
+
+		it("encodes and imports a whole PlainText subtree without expanding its character field", () => {
+			const view = createView();
+			const text = "\u{1F600}".repeat(4000);
+			view.root.insertAt(0, text);
+			const inner = getInnerNode(view.root);
+			const cursor = inner.borrowCursor();
+			cursor.exitNode();
+			const { encode } = makeTestFieldBatchContexts({
+				encodeType: TreeCompressionStrategy.Compressed,
+				isSummary: true,
+				schema: { schema: inner.context.schema, policy: defaultSchemaPolicy },
+			});
+			const encoded = fieldBatchCodecBuilder.build(codecOptions).encode([cursor], encode);
+			cursor.enterNode(0);
+			assert(JSON.stringify(encoded).includes(JSON.stringify(text)));
+			const decoded = TreeAlpha.importCompressed(
+				PlainText.Tree,
+				JSON.parse(JSON.stringify(encoded)) as JsonCompatible,
+				{ jsonValidator: ajvValidator },
+			);
+			assert.equal(decoded.fullString(), text);
+			assert.equal(decoded.characterCount(), 4000);
+			view.dispose();
+		});
+	});
+
 	it("keeps fromString packed through unhydrated reads, edits, and hydration", () => {
 		const text = PlainText.Tree.fromString("ab\u{1F600}".repeat(4000));
 		const reference = plainTextFromString("ab\u{1F600}".repeat(4000), false);

@@ -11,6 +11,39 @@ Pass it as the `forest` option to `createIndependentTreeAlpha` or `configuredSha
 Use `ForestTypeOptimized` for the baseline.
 No stored schema or wire-format change is required.
 
+#### Experimental string-run codec
+
+You can separately opt into the experimental `FieldBatch` format `"text"` with these codec options:
+
+```typescript
+const codecOptions = {
+	minVersionForCollab: FluidClientVersion.v2_74,
+	writeVersionOverrides: new Map([["FieldBatch", "text"]]),
+	allowPossiblyIncompatibleWriteVersionOverrides: true,
+};
+```
+
+Pass these options to `configuredSharedTree` or the internal field-batch codec builder.
+The override is experimental and is not compatible with clients that do not support this format.
+Without the override, the existing V1/V2 write formats remain unchanged.
+
+The compressed codec stores runs of single-code-point string leaves as one string with a shared leaf type.
+It applies to op build content and fields inside whole subtrees, including summaries.
+It does not change stored schema, edit identities, or sequence indices.
+Empty strings, multi-code-point atoms, and separate surrogate halves retain their original logical boundaries.
+Runs can span the in-memory 4096-unit buffers; incremental summary blobs remain separate.
+Explicit uncompressed encoding does not use string runs.
+`TreeAlpha.importCompressed` can read this format.
+`TreeAlpha.exportCompressed` still selects a stable write format through `minVersionForCollab`; it does not expose experimental format overrides.
+
+Packed input is encoded by reading spans rather than individual character values.
+Ordinary cursors can produce the same compact format, but must visit their individual leaves.
+Decoding constructs string chunks directly, and codec adapters preserve these chunks for insertion into the forest.
+The usual forest types can also read this format; the prototype forest retains packed storage through subsequent edits.
+This does not remove per-root delta bookkeeping or guarantee bounded JavaScript engine backing allocations.
+
+#### Packed construction
+
 For packed construction and initialization, pass `PlainText.Tree.fromString` directly to the view:
 
 ```typescript

@@ -99,6 +99,13 @@ export type EncodedFieldBatchAnyVersion =
 	| EncodedFieldBatchVTextExperimental;
 
 /**
+ * Field batches that can contain incremental chunk references.
+ */
+export type EncodedFieldBatchWithIncremental =
+	| EncodedFieldBatchV2
+	| EncodedFieldBatchVTextExperimental;
+
+/**
  * Encoded data, compatible with both V1 and V2 formats.
  * @remarks
  * This is the intersection of the two versions, which is possible because V2 is a non-breaking extension of V1.

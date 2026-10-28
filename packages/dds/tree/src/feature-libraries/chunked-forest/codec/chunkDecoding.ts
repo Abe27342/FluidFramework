@@ -25,6 +25,7 @@ import {
 import { BasicChunk } from "../basicChunk.js";
 import { emptyChunk } from "../emptyChunk.js";
 import { SequenceChunk } from "../sequenceChunk.js";
+import { StringChunk } from "../stringChunk.js";
 
 import {
 	type ChunkDecoder,
@@ -47,12 +48,13 @@ import {
 	type EncodedChunkShape,
 	type EncodedChunkShapeV2,
 	type EncodedFieldBatchAnyVersion,
-	type EncodedFieldBatchV2,
+	type EncodedFieldBatchWithIncremental,
 	type EncodedIncrementalChunkShape,
 	type EncodedInlineArrayShape,
 	type EncodedNestedArrayShape,
 	type EncodedNodeShape,
 	type EncodedSpecializedNodeShape,
+	type EncodedStringRunShape,
 	type EncodedValueShape,
 	type ShapeIndex,
 	SpecialField,
@@ -229,6 +231,19 @@ const decoderLibrary = new DiscriminatedUnionDispatcher<
 	f(shape: EncodedSpecializedNodeShape, context): ChunkDecoder {
 		return new SpecializedNodeDecoder(shape, context);
 	},
+	g(shape: EncodedStringRunShape, context): ChunkDecoder {
+		const type = context.identifier<TreeNodeSchemaIdentifier>(shape.type);
+		return {
+			decode(_decoders, stream): TreeChunk {
+				const text = readStream(stream);
+				assert(
+					typeof text === "string" && text.length > 0,
+					"String runs must contain a nonempty string",
+				);
+				return aggregateChunks(StringChunk.fromString(type, text));
+			},
+		};
+	},
 });
 
 /**
@@ -389,7 +404,7 @@ export class IncrementalChunkDecoder implements ChunkDecoder {
 			0xc27 /* incremental decoder not available for incremental field decoding */,
 		);
 
-		const chunkDecoder = (batch: EncodedFieldBatchV2): TreeChunk => {
+		const chunkDecoder = (batch: EncodedFieldBatchWithIncremental): TreeChunk => {
 			assert(
 				supportsIncrementalEncoding(batch.version),
 				0xc9f /* Unsupported FieldBatchFormatVersion for incremental chunks; must be v2 or higher */,

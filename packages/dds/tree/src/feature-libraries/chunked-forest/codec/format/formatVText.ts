@@ -8,9 +8,20 @@ import type { Static } from "@sinclair/typebox";
 
 import { unionOptions } from "../../../../codec/index.js";
 
-import { ShapeIndex } from "./formatGeneric.js";
+import { IdentifierOrIndex, ShapeIndex } from "./formatGeneric.js";
 import { EncodedFieldShape, EncodedValueShape } from "./formatV1.js";
 import { shapesV2 } from "./formatV2.js";
+
+/**
+ * A run of fieldless string leaves with a common type.
+ * The stream contains one nonempty string, with one logical leaf per Unicode code point.
+ * Encoders must not join separately stored surrogate halves into a single code point.
+ */
+export type EncodedStringRunShape = Static<typeof EncodedStringRunShape>;
+export const EncodedStringRunShape = Type.Object(
+	{ type: IdentifierOrIndex },
+	{ additionalProperties: false },
+);
 
 /**
  * A node shape that derives from another node shape by overlaying property-level overrides.
@@ -79,6 +90,7 @@ export const EncodedChunkShapeVTextExperimental = Type.Object(
 	{
 		...shapesV2,
 		f: Type.Optional(EncodedSpecializedNodeShape),
+		g: Type.Optional(EncodedStringRunShape),
 	},
 	unionOptions,
 );

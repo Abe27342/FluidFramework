@@ -20,6 +20,9 @@ import { MockStorage, validateUsageError } from "@fluidframework/test-runtime-ut
 import { FluidClientVersion, type CodecWriteOptions } from "../../../codec/index.js";
 import { FormatValidatorBasic } from "../../../external-utilities/index.js";
 // eslint-disable-next-line import-x/no-internal-modules
+import { ForestTypeStringPrototype } from "../../../shared-tree/forestTypeStringPrototype.js";
+import { PlainText } from "../../../text/index.js";
+// eslint-disable-next-line import-x/no-internal-modules
 import type { FormatCommon } from "../../../feature-libraries/forest-summary/formatCommon.js";
 import {
 	ForestSummaryFormatVersion,
@@ -83,6 +86,7 @@ function createForestSummarizer(args: {
 	initialContent?: TreeStoredContentStrict;
 	shouldEncodeIncrementally?: IncrementalEncodingPolicy;
 	minVersionForCollab?: OldestSupportedClientVersion;
+	codecOptions?: Partial<CodecWriteOptions>;
 }): { forestSummarizer: ForestSummarizer; checkout: TreeCheckout } {
 	const {
 		initialContent = {
@@ -97,6 +101,7 @@ function createForestSummarizer(args: {
 	const options: CodecWriteOptions = {
 		jsonValidator: FormatValidatorBasic,
 		minVersionForCollab,
+		...args.codecOptions,
 	};
 	const checkout = checkoutWithContent(initialContent, {
 		forestType,
@@ -439,6 +444,60 @@ describe("ForestSummarizer", () => {
 	});
 
 	describe("Incremental summarization", () => {
+		it("preserves string runs in incrementally encoded chunks", async () => {
+			const text = "\u{1F600}".repeat(4000);
+			const codecOptions: Partial<CodecWriteOptions> = {
+				writeVersionOverrides: new Map([
+					["FieldBatch", FieldBatchFormatVersion.vTextExperimental],
+				]),
+				allowPossiblyIncompatibleWriteVersionOverrides: true,
+			};
+			const settings = {
+				encodeType: TreeCompressionStrategy.CompressedIncremental,
+				forestType: ForestTypeStringPrototype,
+				shouldEncodeIncrementally: (_type: string | undefined, fieldKey?: string) =>
+					fieldKey === "",
+				codecOptions,
+			};
+			const storedSchema = toStoredSchema(
+				PlainText.Tree,
+				StagedSchemaUpgradePolicy.permissive,
+			);
+			const { forestSummarizer, checkout } = createForestSummarizer({
+				...settings,
+				initialContent: {
+					schema: storedSchema,
+					initialTree: fieldCursorFromInsertable(
+						PlainText.Tree,
+						PlainText.Tree.fromString(text),
+					),
+				},
+			});
+			const summary = forestSummarizer.summarize({
+				stringify: JSON.stringify,
+				incrementalSummaryContext: {
+					summarySequenceNumber: 0,
+					latestSummarySequenceNumber: -1,
+					summaryPath: "",
+				},
+			});
+			validateSummaryIsIncremental(summary.summary);
+			assert(JSON.stringify(summary.summary).includes('\\"g\\"'));
+			const { forestSummarizer: loader, checkout: loadedCheckout } = createForestSummarizer({
+				...settings,
+				initialContent: { schema: storedSchema, initialTree: fieldJsonCursor([]) },
+			});
+			await loader.load(MockStorage.createFromSummary(summary.summary), JSON.parse);
+			const view = loadedCheckout.viewWith(
+				new TreeViewConfiguration({ schema: PlainText.Tree }),
+			);
+			assert.equal(view.root.fullString(), text);
+			assert.equal(view.root.characterCount(), 4000);
+			view.dispose();
+			checkout.dispose();
+			loadedCheckout.dispose();
+		});
+
 		describe("simple schema", () => {
 			it("object nodes", async () => {
 				await summarizeAndValidateIncrementality(

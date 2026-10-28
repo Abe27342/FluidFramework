@@ -16,6 +16,7 @@ import type {
 	EncodedFieldBatchV1,
 	EncodedFieldBatchV1AndV2,
 	EncodedFieldBatchV2,
+	EncodedFieldBatchVTextExperimental,
 	EncodedNestedArrayShape,
 	EncodedNodeShape,
 	ShapeIndex,
@@ -36,6 +37,12 @@ export function uncompressedEncodeV1(batch: FieldBatch): EncodedFieldBatchV1 {
  */
 export function uncompressedEncodeV2(batch: FieldBatch): EncodedFieldBatchV2 {
 	return uncompressedEncode(batch, brand(FieldBatchFormatVersion.v2));
+}
+
+export function uncompressedEncodeVText(
+	batch: FieldBatch,
+): EncodedFieldBatchVTextExperimental {
+	return uncompressedEncode(batch, FieldBatchFormatVersion.vTextExperimental);
 }
 
 /**
