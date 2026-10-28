@@ -428,7 +428,7 @@ describe("chunkTree", () => {
 					assert.equal(cursor.fieldIndex, fieldLength - 1);
 
 					function checkChunks(
-						innerChunks: TreeChunk[],
+						innerChunks: readonly TreeChunk[],
 						expectedDepthRemaining: number,
 					): void {
 						assert(innerChunks.length <= threshold);

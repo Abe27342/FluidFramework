@@ -14,6 +14,8 @@ import {
 	type TreeStoredSchema,
 	type TreeStoredSchemaSubscription,
 	TreeStoredSchemaRepository,
+	aboveRootPlaceholder,
+	createAnnouncedVisitor,
 	rootFieldKey,
 } from "../../../core/index.js";
 import {
@@ -22,16 +24,30 @@ import {
 	type IChunker,
 	type ShapeInfo,
 	defaultChunkPolicy,
+	coalesceUniformChunks,
 	makeTreeChunker,
 	polymorphic,
+	splitFieldAtIndex,
 	tryShapeFromNodeSchema,
 	// eslint-disable-next-line import-x/no-internal-modules
 } from "../../../feature-libraries/chunked-forest/chunkTree.js";
-// eslint-disable-next-line import-x/no-internal-modules
-import { BasicChunk } from "../../../feature-libraries/chunked-forest/basicChunk.js";
+import {
+	BasicChunk,
+	// eslint-disable-next-line import-x/no-internal-modules
+} from "../../../feature-libraries/chunked-forest/basicChunk.js";
+import {
+	ChunkSequence,
+	ChunkEdit,
+	ChunkSequenceEditor,
+	type MutableChunk,
+	chunkIndexThreshold,
+	getChunkIndex,
+	// eslint-disable-next-line import-x/no-internal-modules
+} from "../../../feature-libraries/chunked-forest/chunkSequence.js";
 /* eslint-disable import-x/no-internal-modules -- Import implementation helpers for direct tests. */
 import {
 	buildChunkedForest,
+	ChunkedForest,
 	ensureExclusiveBasicChunk,
 	locateNodeInChunks,
 } from "../../../feature-libraries/chunked-forest/chunkedForest.js";
@@ -214,7 +230,340 @@ describe("ChunkedForest", () => {
 		[],
 	);
 
+	function forestWithFields(
+		chunker: IChunker,
+		fields: ReadonlyMap<FieldKey, readonly TreeChunk[]>,
+	) {
+		return new ChunkedForest(
+			new BasicChunk(aboveRootPlaceholder, fields),
+			chunker.schema,
+			chunker,
+		);
+	}
+
+	function createField(forest: ChunkedForest, key: FieldKey, chunk: TreeChunk): void {
+		const cursor = chunk.cursor();
+		assert(cursor.firstNode());
+		const visitor = forest.acquireVisitor();
+		visitor.create([cursor], key);
+		visitor.free();
+		chunk.referenceRemoved();
+	}
+
+	describe("field index invalidation", () => {
+		const detachedKey: FieldKey = brand("indexed-detached");
+
+		function setupForest(chunks: TreeChunk[]) {
+			const schema = new TreeStoredSchemaRepository(toInitialSchema(SchemaFactory.number));
+			return forestWithFields(
+				makeTreeChunker(schema, defaultSchemaPolicy, defaultIncrementalEncodingPolicy),
+				new Map([[rootFieldKey, chunks]]),
+			);
+		}
+
+		function checkField(
+			forest: ReturnType<typeof setupForest>,
+			key: FieldKey,
+			expected: readonly number[],
+		): void {
+			const cursor = forest.allocateCursor();
+			try {
+				forest.tryMoveCursorToField({ parent: undefined, fieldKey: key }, cursor);
+				assert.equal(cursor.getFieldLength(), expected.length);
+				for (let index = expected.length - 1; index >= 0; index--) {
+					cursor.enterNode(index);
+					assert.equal(cursor.value, expected[index]);
+					assert.equal(cursor.fieldIndex, index);
+					cursor.exitNode();
+				}
+			} finally {
+				cursor.free();
+			}
+		}
+
+		it("rebuilds after attach, detach, and moves across the indexing threshold", () => {
+			const expected = Array.from({ length: chunkIndexThreshold - 1 }, (_, index) => index);
+			const input = expected.map(
+				(value) => new BasicChunk(numberShape.type, new Map(), value),
+			);
+			const forest = setupForest(input);
+			const chunks = forest.roots.fields.get(rootFieldKey) ?? assert.fail();
+			checkField(forest, rootFieldKey, expected);
+			assert.equal(getChunkIndex(chunks), undefined);
+			createField(forest, detachedKey, new BasicChunk(numberShape.type, new Map(), -1));
+
+			const attach = (index: number): void => {
+				const attachVisitor = forest.acquireVisitor();
+				attachVisitor.enterField(rootFieldKey);
+				attachVisitor.attach(detachedKey, 1, index);
+				attachVisitor.exitField(rootFieldKey);
+				attachVisitor.free();
+				expected.splice(index, 0, -1);
+				checkField(forest, rootFieldKey, expected);
+			};
+			attach(32);
+			assert.notEqual(getChunkIndex(chunks), undefined);
+
+			const visitor = forest.acquireVisitor();
+			visitor.enterField(rootFieldKey);
+			visitor.detach({ start: 32, end: 33 }, detachedKey, { minor: 0 }, false);
+			visitor.exitField(rootFieldKey);
+			visitor.free();
+			expected.splice(32, 1);
+			checkField(forest, rootFieldKey, expected);
+			checkField(forest, detachedKey, [-1]);
+			assert.equal(getChunkIndex(chunks), undefined);
+			attach(0);
+		});
+
+		it("rebuilds after expanding a chunk without changing the node count", () => {
+			const chunks = Array.from(
+				{ length: chunkIndexThreshold },
+				(_, index) =>
+					new UniformChunk(numberShape.withTopLevelLength(2), [index * 2, index * 2 + 1]),
+			);
+			const forest = setupForest(chunks);
+			const expected = Array.from({ length: chunks.length * 2 }, (_, index) => index);
+			checkField(forest, rootFieldKey, expected);
+
+			const visitor = forest.acquireVisitor();
+			visitor.enterField(rootFieldKey);
+			visitor.enterNode(3);
+			visitor.exitNode(3);
+			visitor.exitField(rootFieldKey);
+			visitor.free();
+
+			assert.equal(forest.roots.fields.get(rootFieldKey)?.length, chunkIndexThreshold + 1);
+			checkField(forest, rootFieldKey, expected);
+		});
+
+		it("rebuilds after splitting or coalescing chunk boundaries", () => {
+			const chunks = Array.from(
+				{ length: chunkIndexThreshold + 1 },
+				(_, index) =>
+					new UniformChunk(numberShape.withTopLevelLength(2), [index * 2, index * 2 + 1]),
+			);
+			const sequence = new ChunkSequence(chunks);
+			const expected = Array.from({ length: chunks.length * 2 }, (_, index) => index);
+			const schema = new TreeStoredSchemaRepository(toInitialSchema(SchemaFactory.number));
+			const chunker = makeTreeChunker(
+				schema,
+				defaultSchemaPolicy,
+				defaultIncrementalEncodingPolicy,
+			);
+			const initialIndex = sequence.getIndex();
+			sequence.edit((editor) =>
+				splitFieldAtIndex(editor, 1, { policy: chunker, idCompressor: undefined }),
+			);
+			const splitIndex = sequence.getIndex();
+			assert.notEqual(splitIndex, initialIndex);
+
+			sequence.edit((editor) => coalesceUniformChunks(editor, chunker, { start: 0, end: 3 }));
+			assert.equal(sequence.chunks.length, chunkIndexThreshold);
+			assert.equal(sequence.length, expected.length);
+			assert.notEqual(sequence.getIndex(), splitIndex);
+			sequence.dispose();
+		});
+
+		it("keeps a cloned forest's index independent of mutations", () => {
+			const expected = Array.from({ length: chunkIndexThreshold }, (_, index) => index);
+			const forest = setupForest(
+				expected.map((value) => new BasicChunk(numberShape.type, new Map(), value)),
+			);
+			checkField(forest, rootFieldKey, expected);
+			const clone = forest.clone(forest.schema);
+			checkField(clone, rootFieldKey, expected);
+
+			const visitor = clone.acquireVisitor();
+			visitor.enterField(rootFieldKey);
+			visitor.detach({ start: 0, end: 1 }, detachedKey, { minor: 0 }, false);
+			visitor.exitField(rootFieldKey);
+			visitor.free();
+			checkField(clone, rootFieldKey, expected.slice(1));
+			checkField(clone, detachedKey, [0]);
+			checkField(forest, rootFieldKey, expected);
+		});
+
+		it("supports reads between operations on an acquired visitor", () => {
+			const expected = Array.from({ length: chunkIndexThreshold }, (_, index) => index);
+			const forest = setupForest(
+				expected.map((value) => new BasicChunk(numberShape.type, new Map(), value)),
+			);
+			const visitor = forest.acquireVisitor();
+			visitor.enterField(rootFieldKey);
+			checkField(forest, rootFieldKey, expected);
+			visitor.detach({ start: 0, end: 1 }, detachedKey, { minor: 0 }, false);
+			checkField(forest, rootFieldKey, expected.slice(1));
+			visitor.attach(detachedKey, 1, 0);
+			checkField(forest, rootFieldKey, expected);
+			visitor.exitField(rootFieldKey);
+			visitor.free();
+		});
+
+		it("rejects cloning until the acquired visitor is freed", () => {
+			const forest = setupForest([new BasicChunk(numberShape.type, new Map(), 0)]);
+			const visitor = forest.acquireVisitor();
+			visitor.enterField(rootFieldKey);
+			visitor.enterNode(0);
+			assert.throws(
+				() => forest.clone(forest.schema),
+				validateAssertionError("Cannot clone a forest with an acquired visitor"),
+			);
+			visitor.free();
+			const clone = forest.clone(forest.schema);
+			checkField(clone, rootFieldKey, [0]);
+			const next = forest.acquireVisitor();
+			next.free();
+		});
+
+		it("supports announced reads after mutations while retaining the path", () => {
+			const values = Array.from({ length: chunkIndexThreshold }, (_, index) => index);
+			const forest = setupForest(
+				values.map((value) => new BasicChunk(numberShape.type, new Map(), value)),
+			);
+			let expected: readonly number[] = values;
+			let reads = 0;
+			const read = (): void => {
+				checkField(forest, rootFieldKey, expected);
+				reads++;
+			};
+			forest.registerAnnouncedVisitor(() =>
+				createAnnouncedVisitor({ afterAttach: read, afterDetach: read }),
+			);
+			const visitor = forest.acquireVisitor();
+			visitor.enterField(rootFieldKey);
+			expected = values.slice(1);
+			visitor.detach({ start: 0, end: 1 }, detachedKey, { minor: 0 }, false);
+			expected = values;
+			visitor.attach(detachedKey, 1, 0);
+			visitor.free();
+			assert.equal(reads, 2);
+		});
+
+		it("walks pre-cloned forests independently with both visitors acquired", () => {
+			const values = Array.from({ length: chunkIndexThreshold }, (_, index) => index);
+			const forest = setupForest(
+				values.map((value) => new BasicChunk(numberShape.type, new Map(), value)),
+			);
+			const clone = forest.clone(forest.schema);
+			const first = forest.acquireVisitor();
+			const second = clone.acquireVisitor();
+			first.enterField(rootFieldKey);
+			second.enterField(rootFieldKey);
+			first.enterNode(0);
+			second.enterNode(0);
+			first.exitNode(0);
+			first.detach({ start: 0, end: 1 }, detachedKey, { minor: 0 }, false);
+			checkField(clone, rootFieldKey, values);
+			second.exitNode(0);
+			second.detach(
+				{ start: values.length - 1, end: values.length },
+				detachedKey,
+				{ minor: 0 },
+				false,
+			);
+			checkField(forest, rootFieldKey, values.slice(1));
+			checkField(clone, rootFieldKey, values.slice(0, -1));
+			first.free();
+			second.free();
+		});
+
+		for (const atNode of [false, true]) {
+			it(`releases an unfinished traversal in ${atNode ? "node" : "field"} mode`, () => {
+				const forest = setupForest([new BasicChunk(numberShape.type, new Map(), 0)]);
+				const visitor = forest.acquireVisitor();
+				visitor.enterField(rootFieldKey);
+				visitor.enterNode(0);
+				if (!atNode) {
+					visitor.enterField(brand("absent"));
+				}
+				visitor.free();
+				const clone = forest.clone(forest.schema);
+				checkField(clone, rootFieldKey, [0]);
+				const next = forest.acquireVisitor();
+				next.free();
+			});
+		}
+	});
+
+	it("performs only linear capability validation during a deep traversal", () => {
+		const sf = new SchemaFactory("visitor-depth");
+		class Node extends sf.objectRecursive("Node", {
+			child: sf.optionalRecursive([() => Node]),
+		}) {}
+		const childKey: FieldKey = brand("child");
+		const countChecks = (depth: number): number => {
+			let chunk = new BasicChunk(brand(Node.identifier), new Map());
+			for (let level = 1; level < depth; level++) {
+				chunk = new BasicChunk(brand(Node.identifier), new Map([[childKey, [chunk]]]));
+			}
+			const schema = new TreeStoredSchemaRepository(toInitialSchema(Node));
+			const forest = forestWithFields(
+				makeTreeChunker(schema, defaultSchemaPolicy, defaultIncrementalEncodingPolicy),
+				new Map([[rootFieldKey, [chunk]]]),
+			);
+			const assertFor = ChunkEdit.prototype.assertFor;
+			const assertActive = ChunkSequenceEditor.prototype.assertActive;
+			let checks = 0;
+			ChunkEdit.prototype.assertFor = function (this: ChunkEdit, node: MutableChunk): void {
+				checks++;
+				assertFor.call(this, node);
+			};
+			ChunkSequenceEditor.prototype.assertActive = function (this: ChunkSequenceEditor): void {
+				checks++;
+				assertActive.call(this);
+			};
+			try {
+				const visitor = forest.acquireVisitor();
+				visitor.enterField(rootFieldKey);
+				for (let level = 0; level < depth; level++) {
+					visitor.enterNode(0);
+					if (level + 1 < depth) {
+						visitor.enterField(childKey);
+					}
+				}
+				for (let level = depth - 1; level >= 0; level--) {
+					visitor.exitNode(0);
+					visitor.exitField(level === 0 ? rootFieldKey : childKey);
+				}
+				visitor.free();
+			} finally {
+				ChunkEdit.prototype.assertFor = assertFor;
+				ChunkSequenceEditor.prototype.assertActive = assertActive;
+			}
+			assert(checks < depth * 64);
+			return checks;
+		};
+		const small = countChecks(32);
+		const medium = countChecks(64);
+		const large = countChecks(128);
+		assert.equal(large - medium, 2 * (medium - small));
+	});
+
 	describe("locateNodeInChunks", () => {
+		it("uses an owned index while the field editor is acquired", () => {
+			let lengthReads = 0;
+			class CountingChunk extends UniformChunk {
+				public override get topLevelLength(): number {
+					lengthReads++;
+					return super.topLevelLength;
+				}
+			}
+			const chunks = Array.from(
+				{ length: chunkIndexThreshold },
+				(_, index) => new CountingChunk(numberShape.withTopLevelLength(1), [index]),
+			);
+			const sequence = new ChunkSequence(chunks);
+			const cachedIndex = sequence.getIndex();
+			lengthReads = 0;
+			sequence.edit((editor) => {
+				assert.equal(locateNodeInChunks(editor, chunks.length - 1).chunk, chunks.at(-1));
+				assert.equal(sequence.getIndex(), cachedIndex);
+				assert.equal(lengthReads, 0);
+			});
+			sequence.dispose();
+		});
+
 		it("locates nodes by chunk index and offset", () => {
 			const first = new BasicChunk(numberShape.type, new Map(), 0);
 			const middle = new UniformChunk(numberShape.withTopLevelLength(3), [1, 2, 3]);
@@ -291,7 +640,7 @@ describe("ChunkedForest", () => {
 			const basic = new BasicChunk(numberShape.type, new Map(), 0);
 			const chunks: TreeChunk[] = [basic];
 
-			const result = ensureExclusiveBasicChunk(chunks, 0, makeCompressor());
+			const { chunk: result } = ensureExclusiveBasicChunk(chunks, 0, makeCompressor());
 
 			assert.equal(result, basic);
 			assert.equal(chunks[0], basic);
@@ -316,7 +665,7 @@ describe("ChunkedForest", () => {
 			basic.referenceAdded();
 			const chunks: TreeChunk[] = [basic];
 
-			const result = ensureExclusiveBasicChunk(chunks, 0, makeCompressor());
+			const { chunk: result } = ensureExclusiveBasicChunk(chunks, 0, makeCompressor());
 
 			assert.notEqual(result, basic);
 			assert.equal(chunks[0], result);
@@ -328,7 +677,7 @@ describe("ChunkedForest", () => {
 			const uniform = new UniformChunk(numberShape.withTopLevelLength(3), [0, 1, 2]);
 			const chunks: TreeChunk[] = [uniform];
 
-			const result = ensureExclusiveBasicChunk(chunks, 2, makeCompressor());
+			const { chunk: result } = ensureExclusiveBasicChunk(chunks, 2, makeCompressor());
 
 			assert.equal(result, chunks[2]);
 			assert.equal(result.value, 2);
@@ -343,7 +692,7 @@ describe("ChunkedForest", () => {
 			const trailing = new BasicChunk(numberShape.type, new Map(), 3);
 			const chunks: TreeChunk[] = [leading, uniform, trailing];
 
-			const result = ensureExclusiveBasicChunk(chunks, 3, makeCompressor());
+			const { chunk: result } = ensureExclusiveBasicChunk(chunks, 3, makeCompressor());
 
 			assert.equal(result, chunks[3]);
 			assert.equal(result.value, 2);
@@ -362,7 +711,7 @@ describe("ChunkedForest", () => {
 			sequence.referenceAdded();
 			const chunks: TreeChunk[] = [sequence];
 
-			const result = ensureExclusiveBasicChunk(chunks, 2, makeCompressor());
+			const { chunk: result } = ensureExclusiveBasicChunk(chunks, 2, makeCompressor());
 
 			assert.equal(result, chunks[2]);
 			assert.equal(result.value, 2);
@@ -392,12 +741,8 @@ describe("ChunkedForest", () => {
 				defaultSchemaPolicy,
 				defaultIncrementalEncodingPolicy,
 			);
-			const forest = buildChunkedForest(chunker);
-
 			const uniform = new UniformChunk(numberShape.withTopLevelLength(5), [0, 1, 2, 3, 4]);
-			forest.roots.fields.set(rootFieldKey, [uniform]);
-
-			return forest;
+			return forestWithFields(chunker, new Map([[rootFieldKey, [uniform]]]));
 		}
 
 		/**
@@ -440,12 +785,19 @@ describe("ChunkedForest", () => {
 				defaultSchemaPolicy,
 				defaultIncrementalEncodingPolicy,
 			);
-			const forest = buildChunkedForest(chunker);
-			forest.roots.fields.set(rootFieldKey, [
-				new UniformChunk(numberShape.withTopLevelLength(2), [0, 1]),
-				new UniformChunk(numberShape.withTopLevelLength(5), [2, 3, 4, 5, 6]),
-				new UniformChunk(numberShape.withTopLevelLength(3), [7, 8, 9]),
-			]);
+			const forest = forestWithFields(
+				chunker,
+				new Map([
+					[
+						rootFieldKey,
+						[
+							new UniformChunk(numberShape.withTopLevelLength(2), [0, 1]),
+							new UniformChunk(numberShape.withTopLevelLength(5), [2, 3, 4, 5, 6]),
+							new UniformChunk(numberShape.withTopLevelLength(3), [7, 8, 9]),
+						],
+					],
+				]),
+			);
 
 			const visitor = forest.acquireVisitor();
 			visitor.enterField(rootFieldKey);
@@ -470,16 +822,21 @@ describe("ChunkedForest", () => {
 			const forestSchema = new TreeStoredSchemaRepository(
 				toInitialSchema(SchemaFactory.number),
 			);
-			const forest = buildChunkedForest(
+			const forest = forestWithFields(
 				makeTreeChunker(forestSchema, defaultSchemaPolicy, defaultIncrementalEncodingPolicy),
-			);
-			forest.roots.fields.set(rootFieldKey, [
-				new SequenceChunk([
-					new BasicChunk(numberShape.type, new Map(), 0),
-					new BasicChunk(numberShape.type, new Map(), 1),
-					new BasicChunk(numberShape.type, new Map(), 2),
+				new Map([
+					[
+						rootFieldKey,
+						[
+							new SequenceChunk([
+								new BasicChunk(numberShape.type, new Map(), 0),
+								new BasicChunk(numberShape.type, new Map(), 1),
+								new BasicChunk(numberShape.type, new Map(), 2),
+							]),
+						],
+					],
 				]),
-			]);
+			);
 			// Cloning shares the root and its descendants, forcing enterNode's copy-on-write path.
 			const clone = forest.clone(forestSchema);
 
@@ -507,7 +864,7 @@ describe("ChunkedForest", () => {
 
 			// Stage a source chunk in the detached field to be attached into the middle of root.
 			const source = new UniformChunk(numberShape.withTopLevelLength(1), [99]);
-			forest.roots.fields.set(detachedKey, [source]);
+			createField(forest, detachedKey, source);
 
 			const visitor = forest.acquireVisitor();
 			visitor.enterField(rootFieldKey);
@@ -551,7 +908,6 @@ describe("ChunkedForest", () => {
 				defaultSchemaPolicy,
 				defaultIncrementalEncodingPolicy,
 			);
-			const forest = buildChunkedForest(chunker);
 			let nextValue = 0;
 			const chunks: TreeChunk[] = chunkSizes.map(
 				(size) =>
@@ -560,8 +916,7 @@ describe("ChunkedForest", () => {
 						makeArray(size, () => nextValue++),
 					),
 			);
-			forest.roots.fields.set(rootFieldKey, chunks);
-			return forest;
+			return forestWithFields(chunker, new Map([[rootFieldKey, chunks]]));
 		}
 
 		it("coalesces same-shape neighbors left adjacent by an aligned detach", () => {
@@ -625,7 +980,7 @@ describe("ChunkedForest", () => {
 			// into a single 5-node UniformChunk.
 			const forest = setupForestWithChunks([2, 2]);
 			const source = new UniformChunk(numberShape.withTopLevelLength(1), [99]);
-			forest.roots.fields.set(detachedKey, [source]);
+			createField(forest, detachedKey, source);
 
 			const visitor = forest.acquireVisitor();
 			visitor.enterField(rootFieldKey);
@@ -643,7 +998,7 @@ describe("ChunkedForest", () => {
 		it("releases chunks when destroying a detached field", () => {
 			const forest = setupForest();
 			const source = new UniformChunk(numberShape.withTopLevelLength(1), [99]);
-			forest.roots.fields.set(detachedKey, [source]);
+			createField(forest, detachedKey, source);
 
 			const visitor = forest.acquireVisitor();
 			visitor.destroy(detachedKey, 1);

@@ -20,14 +20,31 @@ import {
 	cursorChunk,
 	dummyRoot,
 } from "../../core/index.js";
-import { ReferenceCountedBase } from "../../util/index.js";
 import { SynchronousCursor, prefixPath } from "../treeCursorUtils.js";
+
+import {
+	type ChunkEdit,
+	ChunkSequence,
+	type ChunkSequenceEditor,
+	findChunkIndex,
+	getChunkIndex,
+	MutableChunk,
+} from "./chunkSequence.js";
 
 /**
  * General purpose one node chunk.
  */
-export class BasicChunk extends ReferenceCountedBase implements TreeChunk {
+export class BasicChunk extends MutableChunk {
 	public readonly topLevelLength: number = 1;
+	public override hasStableTopLevelLength(): boolean {
+		return true;
+	}
+	private readonly fieldSequences = new Map<FieldKey, ChunkSequence>();
+	private readonly fieldViews = new Map<FieldKey, readonly TreeChunk[]>();
+
+	public get fields(): ReadonlyMap<FieldKey, readonly TreeChunk[]> {
+		return this.fieldViews;
+	}
 
 	/**
 	 * Create a tree chunk with ref count 1.
@@ -35,25 +52,83 @@ export class BasicChunk extends ReferenceCountedBase implements TreeChunk {
 	 * Caller must have already accounted for references via `fields` to the children in the fields map (via `referenceAdded`).
 	 */
 	public constructor(
-		public type: TreeNodeSchemaIdentifier,
+		public readonly type: TreeNodeSchemaIdentifier,
 		/**
 		 * Fields of this node.
 		 * @remarks
-		 * This object has exclusive deep ownership of this map (which might mutate it in the future).
-		 * Any code editing this map must update child reference counts.
+		 * The map and arrays are copied, and their child references are transferred to this object.
+		 * Edits must use an owner-issued editor, which maintains child ownership and field indexes.
 		 *
 		 * Like with {@link MapTree}, fields with no nodes must be removed from the map.
 		 */
-		public fields: Map<FieldKey, TreeChunk[]>,
+		fields: ReadonlyMap<FieldKey, readonly TreeChunk[]>,
 		/**
 		 * The value on this node, if any.
 		 */
-		public value?: TreeValue,
+		public readonly value?: TreeValue,
 	) {
 		super();
+		for (const [key, chunks] of fields) {
+			const sequence = new ChunkSequence(chunks, this);
+			this.fieldSequences.set(key, sequence);
+			this.fieldViews.set(key, sequence.chunks);
+		}
+	}
+
+	/**
+	 * Opens a field edit under this node's mutation capability.
+	 * Empty fields are removed when the edit closes.
+	 */
+	public acquireField(editor: ChunkEdit, key: FieldKey): ChunkSequenceEditor {
+		editor.assertFor(this);
+		let sequence = this.fieldSequences.get(key);
+		if (sequence === undefined) {
+			sequence = new ChunkSequence([], this);
+			this.fieldSequences.set(key, sequence);
+		}
+		return sequence.acquireEditor(
+			editor,
+			() => {
+				if (sequence.chunks.length === 0) {
+					this.fieldSequences.delete(key);
+					this.fieldViews.delete(key);
+					sequence.dispose();
+				}
+			},
+			(chunks) => {
+				if (chunks.length === 0) {
+					this.fieldViews.delete(key);
+				} else {
+					this.fieldViews.set(key, chunks);
+				}
+			},
+		);
+	}
+
+	/** Transfers a field's references out of this node. */
+	public takeField(editor: ChunkEdit, key: FieldKey): TreeChunk[] {
+		const field = this.acquireField(editor, key);
+		try {
+			return field.splice(0, field.chunks.length);
+		} finally {
+			field.close();
+		}
+	}
+
+	/** Adopts references into a previously absent field. */
+	public createField(editor: ChunkEdit, key: FieldKey, chunks: readonly TreeChunk[]): void {
+		editor.assertFor(this);
+		assert(!this.fieldSequences.has(key), "Field already exists");
+		const field = this.acquireField(editor, key);
+		try {
+			field.splice(0, 0, chunks);
+		} finally {
+			field.close();
+		}
 	}
 
 	public clone(): BasicChunk {
+		this.assertCloneable();
 		const fields = new Map<FieldKey, TreeChunk[]>();
 		for (const [k, v] of this.fields) {
 			const field = v.map((child) => {
@@ -66,14 +141,13 @@ export class BasicChunk extends ReferenceCountedBase implements TreeChunk {
 	}
 
 	public cursor(): ChunkedCursor {
+		this.assertReadable();
 		return new BasicChunkCursor([this], [], [], [], [], [dummyRoot], 0, 0, 0, undefined);
 	}
 
 	protected onUnreferenced(): void {
-		for (const v of this.fields.values()) {
-			for (const child of v) {
-				child.referenceRemoved();
-			}
+		for (const sequence of this.fieldSequences.values()) {
+			sequence.dispose();
 		}
 	}
 }
@@ -242,9 +316,13 @@ export class BasicChunkCursor extends SynchronousCursor implements ChunkedCursor
 			return this.nestedCursor.getFieldLength();
 		}
 		assert(this.mode === CursorLocationType.Fields, 0x522 /* must be in fields mode */);
+		const chunks = this.getField();
+		const index = getChunkIndex(chunks);
+		if (index !== undefined) {
+			return index.at(-1) ?? oob();
+		}
 		let total = 0;
-		// TODO: optimize?
-		for (const chunk of this.getField()) {
+		for (const chunk of chunks) {
 			total += chunk.topLevelLength;
 		}
 		return total;
@@ -414,6 +492,20 @@ export class BasicChunkCursor extends SynchronousCursor implements ChunkedCursor
 			0x529 /* can only seekNodes when in Nodes */,
 		);
 		assert(this.indexOfChunk < this.siblings.length, 0x52a /* out of bounds indexOfChunk */);
+
+		const cumulativeLengths = getChunkIndex(this.siblings as readonly TreeChunk[]);
+		if (cumulativeLengths !== undefined) {
+			const index = this.index + offset;
+			if (index < 0 || index >= (cumulativeLengths.at(-1) ?? oob())) {
+				this.exitNode();
+				return false;
+			}
+			this.indexOfChunk = findChunkIndex(cumulativeLengths, index);
+			this.indexWithinChunk = index - (cumulativeLengths[this.indexOfChunk - 1] ?? 0);
+			this.index = index;
+			this.initNestedCursor();
+			return true;
+		}
 
 		this.indexWithinChunk += offset;
 		if (offset >= 0) {

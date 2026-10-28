@@ -304,12 +304,8 @@ export function deaggregateChunks(chunk: TreeChunk): TreeChunk[] {
 			// The logic in this file is designed to never produce an nested SequenceChunks or emptyChunk, so its better to throw an error here to detect bugs.
 			assert(!(sub instanceof SequenceChunk), 0x737 /* unexpected nested sequence */);
 			assert(sub !== emptyChunk, 0x738 /* unexpected empty chunk */);
-
-			sub.referenceAdded();
 		}
-
-		chunk.referenceRemoved();
-		return chunk.subChunks;
+		return chunk.takeChildren();
 	} else {
 		return [chunk];
 	}

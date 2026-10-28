@@ -19,6 +19,12 @@ import {
 	// eslint-disable-next-line import-x/no-internal-modules
 } from "../../../feature-libraries/chunked-forest/basicChunk.js";
 import {
+	ChunkSequence,
+	chunkIndexThreshold,
+	getChunkIndex,
+	// eslint-disable-next-line import-x/no-internal-modules
+} from "../../../feature-libraries/chunked-forest/chunkSequence.js";
+import {
 	basicChunkTree,
 	basicOnlyChunkPolicy,
 	chunkField,
@@ -250,6 +256,126 @@ describe("basic chunk", () => {
 		assert.equal(cursor.value, 99);
 	});
 
+	describe("field indexing", () => {
+		it("only builds an index at the chunk-count threshold", () => {
+			for (const length of [
+				chunkIndexThreshold - 1,
+				chunkIndexThreshold,
+				chunkIndexThreshold + 1,
+			]) {
+				const chunks = Array.from({ length }, (_, value) => numericBasicChunk(value));
+				const sequence = new ChunkSequence(chunks);
+				const index = getChunkIndex(sequence.chunks);
+				assert.equal(index !== undefined, length >= chunkIndexThreshold);
+				if (index !== undefined) {
+					assert.deepEqual(
+						index,
+						Array.from({ length }, (_, offset) => offset + 1),
+					);
+				}
+				sequence.dispose();
+			}
+		});
+
+		it("shares cumulative lengths across cursors and rebuilds them after invalidation", () => {
+			class CountingChunk extends WrapperChunk {
+				public lengthReads = 0;
+
+				public override get topLevelLength(): number {
+					this.lengthReads++;
+					return super.topLevelLength;
+				}
+			}
+			const chunks = Array.from(
+				{ length: chunkIndexThreshold },
+				(_, index) => new CountingChunk(numericBasicChunk(index)),
+			);
+			const sequence = new SequenceChunk(chunks);
+			const first = sequence.cursor();
+			const second = sequence.cursor();
+			assert.equal(first.getFieldLength(), chunks.length);
+			assert.equal(second.getFieldLength(), chunks.length);
+			assert(chunks.every((chunk) => chunk.lengthReads === 1));
+
+			const oldIndex = getChunkIndex(sequence.subChunks);
+			const edit = sequence.acquireEditor();
+			const children = sequence.acquireChildren(edit);
+			children.splice(0, 0);
+			children.close();
+			edit.close();
+			assert.equal(sequence.cursor().getFieldLength(), chunks.length);
+			assert.notEqual(getChunkIndex(sequence.subChunks), oldIndex);
+			assert(chunks.every((chunk) => chunk.lengthReads === 2));
+			sequence.referenceRemoved();
+		});
+
+		it("seeks in both directions and forks across mixed chunk boundaries", () => {
+			const shape = new TreeShape(brand(numberSchema.identifier), true, []);
+			let nextValue = 0;
+			const chunks: TreeChunk[] = Array.from({ length: chunkIndexThreshold }, (_, index) => {
+				if (index % 3 === 0) {
+					return numericBasicChunk(nextValue++);
+				}
+				const values = Array.from({ length: (index % 3) + 1 }, () => nextValue++);
+				return index % 3 === 1
+					? new UniformChunk(shape.withTopLevelLength(values.length), values)
+					: new SequenceChunk(values.map((value) => numericBasicChunk(value)));
+			});
+			const sequence = new SequenceChunk(chunks);
+			try {
+				validateChunkCursor(sequence, numberSequenceField(nextValue));
+				const cursor = sequence.cursor();
+				for (let index = nextValue - 1; index >= 0; index--) {
+					cursor.enterNode(index);
+					assert.equal(cursor.value, index);
+					assert.equal(cursor.fieldIndex, index);
+					assert.equal(cursor.getPath()?.parentIndex, index);
+					const fork = cursor.fork();
+					assert(fork.seekNodes(-index));
+					assert.equal(fork.value, 0);
+					assert(fork.seekNodes(nextValue - 1));
+					assert.equal(fork.value, nextValue - 1);
+					assert.equal(fork.seekNodes(1), false);
+					assert.equal(fork.getFieldLength(), nextValue);
+					assert.equal(cursor.seekNodes(-index - 1), false);
+					assert.equal(cursor.getFieldLength(), nextValue);
+				}
+			} finally {
+				sequence.referenceRemoved();
+			}
+		});
+
+		it("restores indexed ancestor fields after visiting a child's indexed field", () => {
+			const nested = Array.from({ length: chunkIndexThreshold }, (_, index) =>
+				numericBasicChunk(index),
+			);
+			const trailing = new BasicChunk(brand("Trailing"), new Map([[EmptyKey, nested]]));
+			const shape = new TreeShape(brand(numberSchema.identifier), true, []);
+			const chunks: TreeChunk[] = Array.from(
+				{ length: chunkIndexThreshold },
+				() => new UniformChunk(shape.withTopLevelLength(2), [10, 20]),
+			);
+			chunks.push(trailing);
+			const sequence = new SequenceChunk(chunks);
+			try {
+				const cursor = sequence.cursor();
+				cursor.enterNode(chunkIndexThreshold * 2);
+				cursor.enterField(EmptyKey);
+				assert.equal(cursor.getFieldLength(), chunkIndexThreshold);
+				cursor.enterNode(chunkIndexThreshold - 1);
+				assert.equal(cursor.value, chunkIndexThreshold - 1);
+				cursor.exitNode();
+				cursor.exitField();
+				assert.equal(cursor.type, trailing.type);
+				assert(cursor.seekNodes(-1));
+				assert.equal(cursor.value, 20);
+				assert.equal(cursor.fieldIndex, chunkIndexThreshold * 2 - 1);
+			} finally {
+				sequence.referenceRemoved();
+			}
+		});
+	});
+
 	describe("SequenceChunk", () => {
 		it("root", () => {
 			validateChunkCursor(new SequenceChunk([numericBasicChunk(0)]), numberSequenceField(1));
@@ -317,13 +443,16 @@ function numericBasicChunk(value: number = 0): BasicChunk {
  * Wrapped chunk owns a ref to the inner one and has ref count 1.
  */
 class WrapperChunk extends ReferenceCountedBase implements TreeChunk {
+	private readonly ownership: ChunkSequence;
+
 	public constructor(public readonly chunk: TreeChunk) {
 		super();
 		chunk.referenceAdded();
+		this.ownership = new ChunkSequence([chunk]);
 	}
 
 	protected onUnreferenced(): void {
-		this.chunk.referenceRemoved();
+		this.ownership.dispose();
 	}
 
 	public get topLevelLength(): number {

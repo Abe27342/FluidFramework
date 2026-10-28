@@ -20,14 +20,16 @@ import {
 	cursorChunk,
 	dummyRoot,
 } from "../../core/index.js";
-import { ReferenceCountedBase, getOrCreate, hasSome } from "../../util/index.js";
+import { getOrCreate, hasSome } from "../../util/index.js";
 import { SynchronousCursor, prefixFieldPath, prefixPath } from "../treeCursorUtils.js";
+
+import { type ChunkEdit, MutableChunk } from "./chunkSequence.js";
 
 /**
  * Create a tree chunk with ref count 1.
  *
  * @param shape - describes the semantics and layout of `values`.
- * @param values - provides exclusive ownership of this array to this object (which might mutate it in the future).
+ * @param values - Values to copy into the chunk's private storage.
  */
 export function uniformChunk(shape: ChunkShape, values: TreeValue[]): TreeChunk {
 	return new UniformChunk(shape, values);
@@ -39,21 +41,37 @@ export function uniformChunk(shape: ChunkShape, values: TreeValue[]): TreeChunk 
  * Separates shape from content,
  * allowing deduplication of shape information and storing of content as a flat sequence of values.
  */
-export class UniformChunk extends ReferenceCountedBase implements TreeChunk {
-	public idCompressor: undefined | IIdCompressor;
+export class UniformChunk extends MutableChunk {
+	private chunkShape: ChunkShape;
+	private readonly chunkValues: TreeValue[];
+	private compressor: undefined | IIdCompressor;
+
+	public get shape(): ChunkShape {
+		return this.chunkShape;
+	}
+
+	public get values(): readonly TreeValue[] {
+		return this.chunkValues;
+	}
+
+	public get idCompressor(): undefined | IIdCompressor {
+		return this.compressor;
+	}
 	/**
 	 * Create a tree chunk with ref count 1.
 	 *
 	 * @param shape - describes the semantics and layout of `values`.
-	 * @param values - provides exclusive ownership of this array to this object (which might mutate it in the future).
+	 * @param values - Values to copy into this chunk's private storage.
 	 */
 	public constructor(
-		public shape: ChunkShape,
-		public values: TreeValue[],
+		shape: ChunkShape,
+		values: readonly TreeValue[],
 		idCompressor?: IIdCompressor,
 	) {
 		super();
-		this.idCompressor = shape.treeShape.mayContainCompressedIds ? idCompressor : undefined;
+		this.chunkShape = shape;
+		this.chunkValues = [...values];
+		this.compressor = shape.treeShape.mayContainCompressedIds ? idCompressor : undefined;
 		assert(
 			shape.treeShape.valuesPerTopLevelNode * shape.topLevelLength === values.length,
 			0x4c3 /* invalid number of values for shape */,
@@ -65,10 +83,46 @@ export class UniformChunk extends ReferenceCountedBase implements TreeChunk {
 	}
 
 	public clone(): UniformChunk {
-		return new UniformChunk(this.shape, [...this.values]);
+		this.assertReadable();
+		return new UniformChunk(this.shape, this.values, this.idCompressor);
+	}
+
+	/** Appends values of this chunk's tree shape without copying the accumulated value buffer. */
+	public append(
+		editor: ChunkEdit,
+		values: readonly TreeValue[],
+		topLevelLength: number,
+		idCompressor?: IIdCompressor,
+	): void {
+		editor.assertFor(this);
+		assert(
+			Number.isSafeInteger(topLevelLength) &&
+				topLevelLength > 0 &&
+				values.length === topLevelLength * this.shape.treeShape.valuesPerTopLevelNode,
+			"Invalid appended values for chunk shape",
+		);
+		assert(
+			this.idCompressor === undefined ||
+				idCompressor === undefined ||
+				this.idCompressor === idCompressor,
+			"Incompatible chunk compressors",
+		);
+		const valueCount = values.length;
+		for (let index = 0; index < valueCount; index++) {
+			const value = values[index];
+			assert(value !== undefined, "Missing appended chunk value");
+			this.chunkValues.push(value);
+		}
+		this.chunkShape = this.shape.treeShape.withTopLevelLength(
+			this.topLevelLength + topLevelLength,
+		);
+		if (this.shape.treeShape.mayContainCompressedIds) {
+			this.compressor ??= idCompressor;
+		}
 	}
 
 	public cursor(): Cursor {
+		this.assertReadable();
 		return new Cursor(this);
 	}
 

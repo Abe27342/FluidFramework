@@ -19,6 +19,11 @@ import { rootFieldKey } from "./types.js";
  * Contiguous part of the tree which get stored together in some data format.
  * Copy-on-write, but optimized to be mutated in place when a chunk only has a single user (detected using reference counting).
  * This allows for efficient cloning without major performance overheads for non-cloning scenarios.
+ *
+ * Mutation authority follows owning references, not borrowed chunk objects.
+ * A contained chunk must only be mutated through its owner, after making the entire owning path exclusive.
+ * Mutable chunk implementations must provide controlled mutation authority that enforces these ownership rules.
+ * In particular, changing a contained chunk's top-level length must invalidate its owner's length metadata before the change.
  */
 export interface TreeChunk extends ReferenceCounted {
 	/**
@@ -35,6 +40,7 @@ export interface TreeChunk extends ReferenceCounted {
 	 *
 	 * This cursor does not own a reference to the data:
 	 * it is up to the caller of this function to ensure the cursor is not used after they release their owning ref to this chunk.
+	 * Cursors must not be used across edits to their content.
 	 *
 	 * TODO: consider starting this in "fields" mode above the top level
 	 * which would compose better with utilities for processing sequences of nodes.

@@ -383,8 +383,7 @@ describe("chunkDecoding", () => {
 			assertRefCount(basic, "shared"); // aggregated and sequence both own a ref.
 			assert(aggregated instanceof SequenceChunk);
 			assert(compareArrays(aggregated.subChunks, [basic, basic2]));
-			basic.referenceRemoved();
-			basic2.referenceRemoved();
+			aggregated.referenceRemoved();
 		}
 
 		assertRefCount(sequence, 1);

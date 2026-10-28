@@ -4,35 +4,69 @@
  */
 
 import { type ChunkedCursor, type TreeChunk, dummyRoot } from "../../core/index.js";
-import { ReferenceCountedBase } from "../../util/index.js";
-
 import { BasicChunkCursor } from "./basicChunk.js";
+import {
+	type ChunkEdit,
+	ChunkSequence,
+	type ChunkSequenceEditor,
+	MutableChunk,
+} from "./chunkSequence.js";
 
 /**
  * General purpose multi-node sequence chunk.
  */
-export class SequenceChunk extends ReferenceCountedBase implements TreeChunk {
+export class SequenceChunk extends MutableChunk {
+	private readonly children: ChunkSequence;
+
+	public get subChunks(): readonly TreeChunk[] {
+		return this.children.chunks;
+	}
+
 	public get topLevelLength(): number {
-		let total = 0;
-		for (const child of this.subChunks) {
-			total += child.topLevelLength;
-		}
-		return total;
+		return this.children.length;
 	}
 
 	/**
 	 * Create a tree chunk with ref count 1.
 	 *
-	 * @param fields - provides exclusive deep ownership of this map to this object (which might mutate it in the future).
-	 * The caller must have already accounted for this reference to the children in this map (via `referenceAdded`),
-	 * and any edits to this must update child reference counts.
-	 * @param value - the value on this node, if any.
+	 * @param subChunks - Child references transferred to this object. The array is copied.
+	 * The caller must have already accounted for these references (via `referenceAdded`).
+	 * Edits must use an owner-issued editor, which maintains child ownership and indexes.
 	 */
-	public constructor(public readonly subChunks: TreeChunk[]) {
+	public constructor(subChunks: readonly TreeChunk[]) {
 		super();
+		this.children = new ChunkSequence(subChunks, this);
+	}
+
+	public acquireChildren(editor: ChunkEdit): ChunkSequenceEditor {
+		return this.children.acquireEditor(editor);
+	}
+
+	/** Consumes an external owning reference and returns independent ownership of the children. */
+	public takeChildren(): TreeChunk[] {
+		this.assertExternalOwnership();
+		let chunks: TreeChunk[];
+		if (this.isShared()) {
+			chunks = this.subChunks.map((child) => {
+				child.referenceAdded();
+				return child;
+			});
+		} else {
+			const editor = this.acquireEditor();
+			const children = this.acquireChildren(editor);
+			try {
+				chunks = children.splice(0, children.chunks.length);
+			} finally {
+				children.close();
+				editor.close();
+			}
+		}
+		this.referenceRemoved();
+		return chunks;
 	}
 
 	public clone(): SequenceChunk {
+		this.assertReadable();
 		const subChunks = this.subChunks.map((child) => {
 			child.referenceAdded();
 			return child;
@@ -41,6 +75,7 @@ export class SequenceChunk extends ReferenceCountedBase implements TreeChunk {
 	}
 
 	public cursor(): ChunkedCursor {
+		this.assertReadable();
 		return new BasicChunkCursor(
 			this.subChunks,
 			[],
@@ -56,8 +91,6 @@ export class SequenceChunk extends ReferenceCountedBase implements TreeChunk {
 	}
 
 	protected onUnreferenced(): void {
-		for (const child of this.subChunks) {
-			child.referenceRemoved();
-		}
+		this.children.dispose();
 	}
 }
