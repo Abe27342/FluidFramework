@@ -212,6 +212,21 @@ export interface IRuntime extends IDisposable {
 	getPendingLocalState(props?: IGetPendingLocalStateProps): unknown;
 
 	/**
+	 * Synchronously captures runtime state that is safe to reuse when loading multiple independent containers.
+	 * Unlike {@link IRuntime.getPendingLocalState}, this must not capture pending edits or local session identity.
+	 *
+	 * @param props - Properties associated with the retained snapshot.
+	 * @returns Opaque state to pass back to the runtime as {@link IContainerContext.pendingLocalState}.
+	 *
+	 * @remarks
+	 * Preserve metadata needed to safely load the retained snapshot, such as its remaining session lifetime.
+	 * This method must not flush or otherwise modify pending edits.
+	 * Its presence indicates support for reusable serialization; loaders must not substitute
+	 * {@link IRuntime.getPendingLocalState} when it is absent.
+	 */
+	getReusableState?(props?: IGetReusableStateProps): unknown;
+
+	/**
 	 * Notify runtime that we have processed a saved message, so that it can do async work (applying
 	 * stashed ops) after having processed it.
 	 */
@@ -439,6 +454,13 @@ export interface IContainerContext {
 	pendingLocalState?: unknown;
 
 	/**
+	 * Session start time, in milliseconds since the Unix epoch, for state captured without a runtime.
+	 * The runtime must use this baseline for session expiry rather than starting a new lifetime on load.
+	 * When omitted, the runtime uses its pending state or starts a new session.
+	 */
+	readonly sessionExpiryTimerStarted?: number;
+
+	/**
 	 * Ambient services provided with the context
 	 */
 	readonly scope: FluidObject;
@@ -584,4 +606,16 @@ export interface IGetPendingLocalStateProps {
 	 * Snapshot sequence number. It will help the runtime to know which ops should still be stashed.
 	 */
 	readonly snapshotSequenceNumber?: number;
+}
+
+/**
+ * Properties for {@link IRuntime.getReusableState}.
+ * @legacy @beta
+ */
+export interface IGetReusableStateProps {
+	/**
+	 * Date to use as the starting time of a session when the retained base snapshot has been refreshed.
+	 * When omitted, preserve the runtime's existing session start time.
+	 */
+	readonly sessionExpiryTimerStarted?: number;
 }

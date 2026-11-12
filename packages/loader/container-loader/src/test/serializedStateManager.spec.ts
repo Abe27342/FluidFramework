@@ -150,9 +150,16 @@ class MockStorageAdapter implements ISerializedStateManagerDocumentStorageServic
 	}
 }
 
-type ISerializedStateManagerRuntime = Pick<IRuntime, "getPendingLocalState">;
+type ISerializedStateManagerRuntime = Pick<
+	IRuntime,
+	"getPendingLocalState" | "getReusableState"
+>;
 
 class MockRuntime implements ISerializedStateManagerRuntime {
+	public getReusableState(): unknown {
+		return {};
+	}
+
 	public getPendingLocalState(_props?: IGetPendingLocalStateProps | undefined): unknown {
 		return { pending: {} };
 	}
@@ -227,7 +234,7 @@ describe("serializedStateManager", () => {
 			});
 		}
 
-		it("omits local runtime state and client identity without calling the runtime", async () => {
+		it("preserves opaque reusable runtime state without capturing pending state or client identity", async () => {
 			const manager = new SerializedStateManager(
 				logger,
 				new MockStorageAdapter(),
@@ -238,20 +245,51 @@ describe("serializedStateManager", () => {
 			);
 			manager.setInitialSnapshot(initialSnapshot);
 			manager.addProcessedOp(generateSavedOp(1));
+			const reusableState = { runtimeMetadata: "preserved" };
 			const runtime: ISerializedStateManagerRuntime = {
 				getPendingLocalState: () =>
 					assert.fail("Reusable serialization must not capture local state"),
+				getReusableState: (props) => {
+					assert.equal(typeof props?.sessionExpiryTimerStarted, "number");
+					return reusableState;
+				},
 			};
 			const state = JSON.parse(
 				await manager.serialize("source-client", runtime, resolvedUrl, {
 					includePendingLocalState: false,
 				}),
 			) as IPendingContainerState;
-			assert.equal(Object.hasOwn(state, "pendingRuntimeState"), false);
+			assert.deepEqual(state.pendingRuntimeState, reusableState);
 			assert.equal(Object.hasOwn(state, "clientId"), false);
 			assert.deepEqual(state.baseSnapshot, initialSnapshot.snapshotTree);
 			assert.deepEqual(state.savedOps, [generateSavedOp(1)]);
 			assert.equal(state.url, resolvedUrl.url);
+			manager.dispose();
+		});
+
+		it("rejects reusable serialization on older runtimes without breaking pending-state capture", async () => {
+			const manager = new SerializedStateManager(
+				logger,
+				new MockStorageAdapter(),
+				true,
+				eventEmitter,
+				() => true,
+				() => false,
+			);
+			manager.setInitialSnapshot(initialSnapshot);
+			const runtime: ISerializedStateManagerRuntime = {
+				getPendingLocalState: () => ({ pending: {} }),
+			};
+			await assert.rejects(
+				manager.serialize("source-client", runtime, resolvedUrl, {
+					includePendingLocalState: false,
+				}),
+				/Runtime does not support reusable serialization/,
+			);
+			const state = JSON.parse(
+				await manager.getPendingLocalState("source-client", runtime, resolvedUrl),
+			) as IPendingContainerState;
+			assert.deepEqual(state.pendingRuntimeState, { pending: {} });
 			manager.dispose();
 		});
 

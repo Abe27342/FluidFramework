@@ -566,6 +566,8 @@ export interface ICaptureFullContainerStateProps {
  * `pendingRuntimeState` is `undefined` — no runtime is instantiated — so the
  * output cannot carry DDS-level in-flight changes. It is intended for state
  * relay, inspection, and durable-state snapshot use cases.
+ * The capture records a session expiry baseline separately from runtime state.
+ * The runtime uses this baseline on load, so storing or reusing the captured state does not renew its garbage-collection session lifetime.
  *
  * Containers that declare loading groups are not yet supported: the function
  * throws `UsageError` if any referenced subtree carries a `groupId`. Group
@@ -593,6 +595,7 @@ export async function captureFullContainerState({
 	logger,
 	blobCaptureMode = "inline",
 }: ICaptureFullContainerStateProps): Promise<string> {
+	const sessionExpiryTimerStarted = Date.now();
 	const resolvedUrl = await urlResolver.resolve(request);
 	if (resolvedUrl === undefined) {
 		throw new UsageError("Failed to resolve request to a Fluid URL");
@@ -744,6 +747,7 @@ export async function captureFullContainerState({
 				Object.keys(attachmentBlobContents).length === 0 ? undefined : attachmentBlobContents,
 			loadedGroupIdSnapshots: undefined,
 			pendingRuntimeState: undefined,
+			sessionExpiryTimerStarted,
 			savedOps,
 			url: resolvedUrl.url,
 		};

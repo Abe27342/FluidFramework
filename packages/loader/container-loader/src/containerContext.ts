@@ -59,6 +59,7 @@ export interface IContainerContextConfig
 				| "supportedFeatures"
 				| "id"
 				| "snapshotWithContents"
+				| "sessionExpiryTimerStarted"
 			>
 		>
 	> {
@@ -73,6 +74,7 @@ export interface IContainerContextConfig
 	readonly taggedLogger: TelemetryLoggerExt;
 	// This "overrides" IContainerContext.snapshotWithContents to be required but allow `undefined`.
 	readonly snapshotWithContents: IContainerContext["snapshotWithContents"] | undefined;
+	readonly sessionExpiryTimerStarted: number | undefined;
 	// fetchOps is an internal-only capability (IContainerContextInternal), not part of the public
 	// IContainerContext contract. Optional: hosts may not provide op reading.
 	readonly fetchOps: IContainerContextInternal["fetchOps"];
@@ -87,8 +89,8 @@ export interface IContainerContextConfig
  */
 export class ContainerContext
 	implements
-		Required<Omit<IContainerContext, "snapshotWithContents">>,
-		Pick<IContainerContext, "snapshotWithContents">,
+		Required<Omit<IContainerContext, "snapshotWithContents" | "sessionExpiryTimerStarted">>,
+		Pick<IContainerContext, "snapshotWithContents" | "sessionExpiryTimerStarted">,
 		Pick<IContainerContextInternal, "fetchOps" | "updatePendingOpState">,
 		IProvideLayerCompatDetails
 {
@@ -151,6 +153,7 @@ export class ContainerContext
 	public readonly existing: boolean;
 	public readonly taggedLogger: TelemetryLoggerExt;
 	public readonly pendingLocalState: unknown;
+	public readonly sessionExpiryTimerStarted?: number;
 	public readonly snapshotWithContents?: ISnapshot;
 
 	public readonly getConnectionState: () => ConnectionState;
@@ -212,6 +215,9 @@ export class ContainerContext
 		this.existing = config.existing;
 		this.taggedLogger = config.taggedLogger;
 		this.pendingLocalState = config.pendingLocalState;
+		if (config.sessionExpiryTimerStarted !== undefined) {
+			this.sessionExpiryTimerStarted = config.sessionExpiryTimerStarted;
+		}
 		if (config.snapshotWithContents !== undefined) {
 			this.snapshotWithContents = config.snapshotWithContents;
 		}

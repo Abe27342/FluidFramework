@@ -204,6 +204,7 @@ export interface IContainerContext {
     // (undocumented)
     readonly quorum: IQuorumClients;
     readonly scope: FluidObject;
+    readonly sessionExpiryTimerStarted?: number;
     // @system
     readonly signalAudience?: IAudience;
     readonly snapshotWithContents?: ISnapshot;
@@ -418,6 +419,11 @@ export interface IGetPendingLocalStateProps {
 }
 
 // @beta @legacy
+export interface IGetReusableStateProps {
+    readonly sessionExpiryTimerStarted?: number;
+}
+
+// @beta @legacy
 export interface IHostLoader extends ILoader {
     createDetachedContainer(codeDetails: IFluidCodeDetails, createDetachedProps?: {
         canReconnect?: boolean;
@@ -466,6 +472,7 @@ export interface IRuntime extends IDisposable {
     createSummary(blobRedirectTable?: Map<string, string>): ISummaryTree;
     getEntryPoint(): Promise<FluidObject>;
     getPendingLocalState(props?: IGetPendingLocalStateProps): unknown;
+    getReusableState?(props?: IGetReusableStateProps): unknown;
     notifyOpReplay?(message: ISequencedDocumentMessage): Promise<void>;
     process(message: ISequencedDocumentMessage, local: boolean): any;
     processSignal(message: any, local: boolean): any;

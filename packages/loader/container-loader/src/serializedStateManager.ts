@@ -88,6 +88,11 @@ export interface IPendingContainerState extends SnapshotWithBlobs {
 	 */
 	pendingRuntimeState: unknown;
 	/**
+	 * Session expiry baseline for driver-only capture, passed to the runtime through the container context.
+	 * Runtime-based capture keeps expiry metadata in its opaque pendingRuntimeState instead.
+	 */
+	sessionExpiryTimerStarted?: number;
+	/**
 	 * Any group snapshots (aka delay-loaded) we've downloaded from the service for this container
 	 */
 	loadedGroupIdSnapshots?: Record<string, SerializedSnapshotInfo>;
@@ -434,7 +439,7 @@ export class SerializedStateManager implements IDisposable {
 	 */
 	public async serialize(
 		clientId: string | undefined,
-		runtime: Pick<IRuntime, "getPendingLocalState">,
+		runtime: Pick<IRuntime, "getPendingLocalState" | "getReusableState">,
 		resolvedUrl: IResolvedUrl,
 		options: ContainerSerializationOptions,
 	): Promise<string> {
@@ -458,13 +463,21 @@ export class SerializedStateManager implements IDisposable {
 			},
 			async () => {
 				assert(this.snapshotInfo !== undefined, 0x8e5 /* no base data */);
-				const pendingRuntimeState = includePendingLocalState
-					? await runtime.getPendingLocalState({
-							notifyImminentClosure: false,
-							snapshotSequenceNumber: this.snapshotInfo.snapshotSequenceNumber,
-							sessionExpiryTimerStarted: this.snapshotInfo.snapshotFetchedTime,
-						})
-					: undefined;
+				let pendingRuntimeState: unknown;
+				if (includePendingLocalState) {
+					pendingRuntimeState = await runtime.getPendingLocalState({
+						notifyImminentClosure: false,
+						snapshotSequenceNumber: this.snapshotInfo.snapshotSequenceNumber,
+						sessionExpiryTimerStarted: this.snapshotInfo.snapshotFetchedTime,
+					});
+				} else {
+					if (runtime.getReusableState === undefined) {
+						throw new UsageError("Runtime does not support reusable serialization");
+					}
+					pendingRuntimeState = runtime.getReusableState({
+						sessionExpiryTimerStarted: this.snapshotInfo.snapshotFetchedTime,
+					});
+				}
 				// Keep the snapshot and trailing ops together while blob reads yield to incoming ops
 				// and snapshot refreshes.
 				const snapshotInfo = this.snapshotInfo;

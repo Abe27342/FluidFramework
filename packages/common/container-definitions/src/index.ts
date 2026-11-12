@@ -71,6 +71,7 @@ export type {
 	IProvideRuntimeFactory,
 	IRuntime,
 	IGetPendingLocalStateProps,
+	IGetReusableStateProps,
 } from "./runtime.js";
 export { AttachState, IRuntimeFactory, type IContainerStorageService } from "./runtime.js";
 

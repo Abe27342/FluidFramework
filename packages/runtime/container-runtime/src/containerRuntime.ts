@@ -24,6 +24,7 @@ import type {
 	IContainerContext,
 	IContainerContextInternal,
 	IGetPendingLocalStateProps,
+	IGetReusableStateProps,
 	IRuntime,
 	IDeltaManager,
 	IDeltaManagerFull,
@@ -2155,7 +2156,8 @@ export class ContainerRuntime
 			getLastSummaryTimestampMs: () => this.messageAtLastSummary?.timestamp,
 			readAndParseBlob: async <T>(id: string) => readAndParse<T>(this.storage, id),
 			submitMessage: (message: ContainerRuntimeGCMessage) => this.submit(message),
-			sessionExpiryTimerStarted: pendingRuntimeState?.sessionExpiryTimerStarted,
+			sessionExpiryTimerStarted:
+				pendingRuntimeState?.sessionExpiryTimerStarted ?? context.sessionExpiryTimerStarted,
 		});
 
 		const loadedFromSequenceNumber = this.deltaManager.initialSequenceNumber;
@@ -5801,6 +5803,19 @@ export class ContainerRuntime
 		this.disposeFn();
 	}
 
+	/**
+	 * {@inheritDoc @fluidframework/container-definitions#IRuntime.getReusableState}
+	 */
+	public getReusableState(props?: IGetReusableStateProps): {
+		sessionExpiryTimerStarted: number | undefined;
+	} {
+		this.verifyNotClosed();
+		return {
+			sessionExpiryTimerStarted:
+				props?.sessionExpiryTimerStarted ?? this.garbageCollector.sessionExpiryTimerStarted,
+		};
+	}
+
 	public getPendingLocalState(props?: IGetPendingLocalStateProps): unknown {
 		// AB#46464 - Add support for serializing pending state while in staging mode
 		if (this.inStagingMode) {
@@ -5830,17 +5845,14 @@ export class ContainerRuntime
 				const { pending } = this.pendingStateManager.getLocalState(
 					props?.snapshotSequenceNumber,
 				);
-				const sessionExpiryTimerStarted =
-					props?.sessionExpiryTimerStarted ?? this.garbageCollector.sessionExpiryTimerStarted;
-
 				const pendingIdCompressorState = this._idCompressor?.serialize(true);
 				const pendingAttachmentBlobs = this.blobManager.getPendingBlobs();
 
 				const pendingRuntimeState: IPendingRuntimeState = {
+					...this.getReusableState(props),
 					pending,
 					pendingIdCompressorState,
 					pendingAttachmentBlobs,
-					sessionExpiryTimerStarted,
 				};
 				event.end({
 					attachmentBlobsSize: Object.keys(pendingAttachmentBlobs ?? {}).length,

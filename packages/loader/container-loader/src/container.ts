@@ -1749,6 +1749,7 @@ export class Container
 			// give runtime a dummy value so it knows we're loading from a stash blob
 			pendingLocalState ? (pendingLocalState?.pendingRuntimeState ?? {}) : undefined,
 			isInstanceOfISnapshot(baseSnapshot) ? baseSnapshot : undefined,
+			pendingLocalState?.sessionExpiryTimerStarted,
 		);
 
 		// replay saved ops
@@ -2444,6 +2445,7 @@ export class Container
 		snapshotTree: ISnapshotTree | undefined,
 		pendingLocalState?: unknown,
 		snapshot?: ISnapshot,
+		sessionExpiryTimerStarted?: number,
 	): Promise<void> {
 		assert(this._runtime?.disposed !== false, 0x0dd /* "Existing runtime not disposed" */);
 
@@ -2513,6 +2515,7 @@ export class Container
 				existing,
 				taggedLogger: this.subLogger,
 				pendingLocalState,
+				sessionExpiryTimerStarted,
 				snapshotWithContents: snapshot,
 			});
 
@@ -2774,6 +2777,8 @@ export interface ContainerAlpha extends IContainer {
 	 * `@fluidframework/container-loader`.
 	 * With `includePendingLocalState: false`, the result captures only sequenced state.
 	 * Unsequenced operations, pending attachment blobs, and session-specific runtime state are omitted.
+	 * Runtime metadata needed for safe loading, including the remaining GC session lifetime, is preserved.
+	 * The runtime must support reusable serialization; otherwise, this method throws `UsageError`.
 	 * The original container is not modified and can continue editing.
 	 * The result can safely load multiple independent instances of the same document, including
 	 * frozen containers at the captured state.

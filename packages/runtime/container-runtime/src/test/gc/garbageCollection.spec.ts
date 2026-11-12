@@ -284,6 +284,7 @@ describe("Garbage Collection Tests", () => {
 					closeCalled = true;
 				},
 			});
+			assert.equal(gc.sessionExpiryTimerStarted, sessionExpiryTimerStarted);
 			assert(closeCalled === false, "Close should not have been called");
 			clock.tick(1);
 			assert(closeCalled, "Close should have been called");

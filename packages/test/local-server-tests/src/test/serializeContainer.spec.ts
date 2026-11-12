@@ -9,6 +9,7 @@ import { bufferToString, stringToBuffer } from "@fluid-internal/client-utils";
 import { ContainerRuntimeFactoryWithDefaultDataStore } from "@fluidframework/aqueduct/internal";
 import type { IContainer } from "@fluidframework/container-definitions/internal";
 import {
+	captureFullContainerState,
 	createDetachedContainer,
 	loadExistingContainer,
 	loadFrozenContainerFromPendingState,
@@ -16,8 +17,13 @@ import {
 	type ILoaderProps,
 } from "@fluidframework/container-loader/internal";
 import { asLegacyAlpha } from "@fluidframework/container-loader/legacy/alpha";
+import {
+	ContainerMessageType,
+	type ContainerRuntime,
+} from "@fluidframework/container-runtime/internal";
 import type { FluidObject, IFluidHandle } from "@fluidframework/core-interfaces/internal";
 import { SharedMap } from "@fluidframework/map/internal";
+import { toFluidHandleInternal } from "@fluidframework/runtime-utils/internal";
 import {
 	LocalDeltaConnectionServer,
 	type ILocalDeltaConnectionServer,
@@ -36,6 +42,7 @@ import {
 	type ITree,
 	type TreeView,
 } from "@fluidframework/tree/internal";
+import { stub } from "sinon";
 
 import { createLoader } from "./utils.js";
 
@@ -46,6 +53,7 @@ class SerializationRoot extends schemaFactory.object("Root", {
 }) {}
 const treeConfiguration = new TreeViewConfiguration({ schema: SerializationRoot });
 const treeKey = "serializationTree";
+const sessionExpiryTimeoutMs = 30 * 24 * 60 * 60 * 1000;
 
 async function getDataObject(container: IContainer): Promise<ITestFluidObject> {
 	const entryPoint: FluidObject<TestFluidObject> = await container.getEntryPoint();
@@ -99,6 +107,7 @@ describe("container serialization", () => {
 			oldestSupportedClient: "2.40.0",
 			registryEntries: [[factory.type, Promise.resolve(factory)]],
 			runtimeOptions: {
+				gcOptions: { sessionExpiryTimeoutMs },
 				enableRuntimeIdCompressor: "on",
 				explicitSchemaControl: true,
 				createBlobPayloadPending: true,
@@ -210,6 +219,81 @@ describe("container serialization", () => {
 			});
 		}
 	}
+
+	for (const captureMode of ["runtime", "inline", "reference"] as const) {
+		it(`preserves session expiry through reusable loads and subsequent serialization: ${captureMode}`, async () => {
+			const capturedAt = Date.now();
+			const now = stub(Date, "now").returns(capturedAt);
+			try {
+				const state =
+					captureMode === "runtime"
+						? await serialize(source, false)
+						: await captureFullContainerState({
+								...loaderProps,
+								request: { url },
+								blobCaptureMode: captureMode,
+							});
+				now.returns(capturedAt + sessionExpiryTimeoutMs / 2);
+				const first = await loadFrozen(state);
+				const second = await loadFrozen(state);
+				const firstObject = await getDataObject(first);
+				const secondObject = await getDataObject(second);
+				assert.equal(firstObject.root.get("value"), "sequenced");
+				assert.equal(secondObject.root.get("value"), "sequenced");
+				const recaptured = await serialize(first, false);
+				const continued = await getRequiredPendingLocalState(first);
+				now.returns(capturedAt + sessionExpiryTimeoutMs + 1);
+				for (const expired of [state, recaptured, continued]) {
+					await assert.rejects(loadFrozen(expired), /Client session expired/);
+					await assert.rejects(loadLive(expired), /Client session expired/);
+				}
+			} finally {
+				now.restore();
+			}
+		});
+	}
+
+	it("rejects expired state that still references a blob swept from the live document", async () => {
+		const blob = await sourceObject.runtime.uploadBlob(stringToBuffer("old blob", "utf8"));
+		sourceObject.root.set("oldBlob", blob);
+		await waitForSaved(source);
+		const capturedAt = Date.now();
+		const states = [
+			await serialize(source, false),
+			await captureFullContainerState({ ...loaderProps, request: { url } }),
+		];
+
+		sourceObject.root.delete("oldBlob");
+		await waitForSaved(source);
+		// Sequence a sweep to simulate already-deleted content, not the timed summarizer lifecycle.
+		const runtime = (sourceObject as TestFluidObject).context
+			.containerRuntime as ContainerRuntime;
+		// eslint-disable-next-line @typescript-eslint/dot-notation -- Exercise a sequenced sweep without running a summarizer.
+		runtime["submit"]({
+			type: ContainerMessageType.GC,
+			contents: {
+				type: "Sweep",
+				deletedNodeIds: [toFluidHandleInternal(blob).absolutePath],
+			},
+		});
+		// GC ops do not dirty the container; wait for an acknowledged edit after the sweep.
+		sourceObject.root.set("afterSweep", true);
+		await waitForSaved(source);
+		const deletedBlob = await runtime.resolveHandle({
+			url: toFluidHandleInternal(blob).absolutePath,
+		});
+		assert.equal(deletedBlob.status, 404);
+		assert.match(deletedBlob.value, /Blob was deleted/);
+
+		const now = stub(Date, "now").returns(capturedAt + sessionExpiryTimeoutMs + 1);
+		try {
+			for (const state of states) {
+				await assert.rejects(loadFrozen(state), /Client session expired/);
+			}
+		} finally {
+			now.restore();
+		}
+	});
 
 	it("loads reusable state into multiple live containers while the source remains open", async () => {
 		const state = await serialize(source, false);

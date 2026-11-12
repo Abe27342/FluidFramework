@@ -214,7 +214,7 @@ export class GarbageCollector implements IGarbageCollector {
 				this.closeFn(new ClientSessionExpiredError(`Client session expired.`, timeoutMs));
 			});
 			this.sessionExpiryTimer.start();
-			this.sessionExpiryTimerStarted = Date.now();
+			this.sessionExpiryTimerStarted = pendingSessionExpiryTimerStarted ?? Date.now();
 		}
 
 		this.summaryStateTracker = new GCSummaryStateTracker(this.configs);

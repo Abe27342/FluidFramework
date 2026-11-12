@@ -3259,6 +3259,40 @@ describe("Runtime", () => {
 		});
 
 		describe("GetPendingState", () => {
+			it("captures only reusable metadata without flushing or collecting pending state", async () => {
+				const { runtime: containerRuntime } = await ContainerRuntime.loadRuntime2({
+					context: getMockContext({ logger: new MockLogger() }) as IContainerContext,
+					registry: new FluidDataStoreRegistry([]),
+					existing: false,
+					runtimeOptions: {
+						enableRuntimeIdCompressor: "on",
+					},
+					provideEntryPoint: mockProvideEntryPoint,
+				});
+				const original = containerRuntime.getPendingLocalState() as IPendingRuntimeState;
+				assert.equal(typeof original.sessionExpiryTimerStarted, "number");
+				const flush = Sinon.stub(
+					containerRuntime as unknown as ContainerRuntime_WithPrivates,
+					"flush",
+				).throws(new Error("Reusable capture must not flush"));
+				const pending = Sinon.stub(containerRuntime, "getPendingLocalState").throws(
+					new Error("Reusable capture must not collect pending state"),
+				);
+				try {
+					assert.deepEqual(containerRuntime.getReusableState(), {
+						sessionExpiryTimerStarted: original.sessionExpiryTimerStarted,
+					});
+					assert.deepEqual(
+						containerRuntime.getReusableState({ sessionExpiryTimerStarted: 100 }),
+						{ sessionExpiryTimerStarted: 100 },
+					);
+				} finally {
+					flush.restore();
+					pending.restore();
+					containerRuntime.dispose();
+				}
+			});
+
 			it("No Props. No pending state", async () => {
 				const logger = new MockLogger();
 
