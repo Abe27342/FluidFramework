@@ -51,6 +51,9 @@ export const emptyCursor: ChunkedCursor = {
 	[CursorMarker]: true,
 	pending: false,
 	mode: CursorLocationType.Fields,
+	get rootLength(): number {
+		return 0;
+	},
 	[cursorChunk]: emptyChunk,
 	nextField(): boolean {
 		fail(0xafb /* cannot navigate above root */);

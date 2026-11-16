@@ -96,6 +96,12 @@ export function tryGetChunk(cursor: ITreeCursor): undefined | TreeChunk {
  */
 export interface ChunkedCursor extends ITreeCursorSynchronous, WithChunk {
 	/**
+	 * The number of top-level nodes in the active storage chunk.
+	 * Unlike getFieldLength(), this is available in both modes and does not change when entering an inline child field.
+	 */
+	readonly rootLength: number;
+
+	/**
 	 * Checks if the cursor is in the top level nodes of the chunk.
 	 *
 	 * @returns true iff cursor is within the root field, including at a node within that field.

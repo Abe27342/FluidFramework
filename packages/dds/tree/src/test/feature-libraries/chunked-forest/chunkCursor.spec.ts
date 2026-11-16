@@ -77,6 +77,41 @@ describe("chunkCursor", () => {
 	});
 
 	describe("ChunkCursor", () => {
+		it("keeps adapter root lengths independent of child fields and restores them across boundaries", () => {
+			const leaf = new TreeShape(brand(numberSchema.identifier), true, []);
+			const shape = new TreeShape(brand("parent"), false, [[EmptyKey, leaf, 2]]);
+			const uniform = new UniformChunk(shape.withTopLevelLength(3), [1, 2, 3, 4, 5, 6]);
+			const basic = new BasicChunk(
+				brand("basic"),
+				new Map([[EmptyKey, [new SequenceChunk([uniform])]]]),
+			);
+			const cursor = basic.cursor();
+			cursor.enterNode(0);
+			cursor.enterField(EmptyKey);
+			assert.equal(cursor.getFieldLength(), 3);
+			assert.equal(cursor.rootLength, 1);
+			cursor.enterNode(1);
+			assert.equal(cursor.rootLength, 3);
+			cursor.enterField(EmptyKey);
+			assert.equal(cursor.getFieldLength(), 2);
+			assert.equal(cursor.rootLength, 3);
+			const fork = cursor.fork();
+			cursor.enterNode(1);
+			assert.equal(cursor.value, 4);
+			assert.equal(cursor.rootLength, 3);
+			cursor.exitNode();
+			cursor.exitField();
+			assert(cursor.nextNode());
+			assert.equal(cursor.fieldIndex, 2);
+			cursor.exitNode();
+			assert.equal(cursor.rootLength, 1);
+			assert.equal(cursor.getFieldLength(), 3);
+			fork.enterNode(0);
+			assert.equal(fork.value, 3);
+			assert.equal(fork.rootLength, 3);
+			basic.referenceRemoved();
+		});
+
 		it("refreshes inline capabilities after reset and releases them on clear without changing forks", () => {
 			class ResettableCursor extends ChunkCursor {
 				public select(chunk: TreeChunk): void {

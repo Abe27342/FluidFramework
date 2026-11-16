@@ -360,6 +360,9 @@ class Cursor extends SynchronousCursor implements ChunkedCursor {
 	private readonly stride: number;
 
 	public mode: CursorLocationType = CursorLocationType.Fields;
+	public get rootLength(): number {
+		return this.shape.topLevelLength;
+	}
 
 	// Undefined when not in fields mode.
 	private fieldKey?: FieldKey;
