@@ -1,0 +1,23 @@
+{
+  "version": "vRangeExperimental",
+  "data": [
+    [
+      "root",
+      [
+        [
+          10,
+          0,
+          0,
+          3
+        ],
+        [
+          15,
+          0,
+          3,
+          3
+        ]
+      ]
+    ]
+  ],
+  "maxId": 0
+}
