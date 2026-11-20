@@ -111,7 +111,8 @@ export class DetachedFieldIndex implements ReadOnlyDetachedFieldIndex {
 	}));
 
 	/**
-	 * Immutable records in node-index order, covering every tracked field without gaps.
+	 * The contents of each tracked forest field, described by concatenating its immutable runs in array order.
+	 * The runs are in node-index order and cover the field without gaps.
 	 */
 	private readonly fieldToRanges = new Map<ForestRootId, readonly DetachedFieldRange[]>();
 
@@ -254,29 +255,38 @@ export class DetachedFieldIndex implements ReadOnlyDetachedFieldIndex {
 	public getFieldRanges(root: ForestRootId, range: Range): readonly DetachedNodeRange[] {
 		const records = this.getCheckedField(root, range);
 		const result: DetachedNodeRange[] = [];
+		if (range.start === range.end) {
+			return result;
+		}
 		let position = range.start;
 		for (const record of records) {
-			const start = Math.max(range.start, record.index);
-			const end = Math.min(range.end, record.index + record.count);
-			if (start < end) {
-				assert(start === position, "Forest field range contains untracked nodes");
-				const id = offsetDetachId(record.id, start - record.index);
-				const count = end - start;
-				const previous = result[result.length - 1];
-				if (
-					previous !== undefined &&
-					previous.id.major === id.major &&
-					previous.id.minor + previous.count === id.minor
-				) {
-					result[result.length - 1] = {
-						id: previous.id,
-						count: previous.count + count,
-					};
-				} else {
-					result.push({ id, count });
-				}
-				position = end;
+			const recordEnd = record.index + record.count;
+			if (recordEnd <= range.start) {
+				continue;
 			}
+			if (record.index >= range.end) {
+				break;
+			}
+
+			const start = Math.max(range.start, record.index);
+			const end = Math.min(range.end, recordEnd);
+			assert(start === position, "Forest field range contains untracked nodes");
+			const id = offsetDetachId(record.id, start - record.index);
+			const count = end - start;
+			const previous = result[result.length - 1];
+			if (
+				previous !== undefined &&
+				previous.id.major === id.major &&
+				previous.id.minor + previous.count === id.minor
+			) {
+				result[result.length - 1] = {
+					id: previous.id,
+					count: previous.count + count,
+				};
+			} else {
+				result.push({ id, count });
+			}
+			position = end;
 		}
 		assert(position === range.end, "Forest field range contains untracked nodes");
 		return result;

@@ -875,6 +875,7 @@ describe("DetachedFieldIndex methods", () => {
 			assert.throws(() => index.getLocation(makeDetachedNodeId(undefined, 0)));
 			assert.throws(() => index.getFieldRanges(brand(root + 1), { start: 0, end: 1 }));
 			assert.deepEqual(index.getFieldRanges(root, { start: 10, end: 10 }), []);
+			assert.deepEqual(index.getFieldRanges(root, { start: 5, end: 5 }), []);
 			index.deleteRange(root, { start: 10, end: 10 });
 			assert.deepEqual([...index.ranges()], original);
 			assert.equal(index.createRange(makeDetachedNodeId(undefined, 20), undefined), root + 1);
