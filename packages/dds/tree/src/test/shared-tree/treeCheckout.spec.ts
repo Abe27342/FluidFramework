@@ -26,6 +26,7 @@ import {
 	type NormalizedFieldUpPath,
 	LeafNodeStoredSchema,
 	makeDetachedFieldIndex,
+	mapCursorField,
 	offsetDetachId,
 	type TreeNodeSchemaIdentifier,
 	type TreeStoredSchema,
@@ -574,11 +575,10 @@ describe("sharedTreeView", () => {
 					assert.equal(data.type, "data");
 					const refreshers = data.innerChange.refreshers;
 					assert(refreshers !== undefined);
-					const values = Array.from(refreshers.values(), (chunk) => {
-						const cursor = chunk.cursor();
-						cursor.enterNode(0);
-						return cursor.value;
-					});
+					assert.equal(refreshers.size, 1);
+					const values = [...refreshers.values()].flatMap((chunk) =>
+						mapCursorField(chunk.cursor(), (cursor) => cursor.value),
+					);
 					assert.deepEqual(values.sort(), content);
 				});
 				(undoStack.pop() ?? assert.fail("Expected deletion revertible")).revert();

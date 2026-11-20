@@ -26,6 +26,7 @@ import {
 	type DeltaFieldChanges,
 	type DeltaRoot,
 	type DeltaDetachedNodeId,
+	type DetachedNodeRange,
 	type ChangeEncodingContext,
 	Multiplicity,
 	type RevisionInfo,
@@ -53,6 +54,8 @@ import {
 	fieldKindConfigurations,
 	newChangeAtomIdBTree,
 	ModularChangeFormatVersion,
+	NodeMoveType,
+	relevantRemovedRoots,
 } from "../../../feature-libraries/index.js";
 import {
 	type EncodedModularChangesetV1,
@@ -73,6 +76,7 @@ import type {
 import {
 	brand,
 	brandConst,
+	type RangeQueryResult,
 	nestedMapFromFlatList,
 	tryGetFromNestedMap,
 } from "../../../util/index.js";
@@ -1162,6 +1166,49 @@ describe("ModularChangeFamily", () => {
 		});
 	});
 
+	describe("relevant removed roots", () => {
+		const field = { nodeId: undefined, field: brand<FieldKey>("foo") };
+		it("keeps a large attach range compact even when a root inside it is edited", () => {
+			const change = Change.empty();
+			change.crossFieldKeys.set(
+				{ revision: tag1, localId: brand(0), target: NodeMoveType.Attach },
+				1_000_000,
+				field,
+			);
+			change.rootNodes.nodeChanges.set([tag1, brand(10)], { localId: brand(0) });
+			assert.deepEqual(
+				[...relevantRemovedRoots(change)],
+				[{ id: { major: tag1, minor: 0 }, count: 1_000_000 }],
+			);
+		});
+
+		it("keeps missing attach spans and revision boundaries separate", () => {
+			const change = Change.empty();
+			change.crossFieldKeys.set(
+				{ revision: tag1, localId: brand(0), target: NodeMoveType.Attach },
+				10,
+				field,
+			);
+			change.crossFieldKeys.set(
+				{ revision: tag1, localId: brand(3), target: NodeMoveType.Detach },
+				4,
+				field,
+			);
+			change.rootNodes.oldToNewId.set({ revision: tag2, localId: brand(0) }, 5, {
+				revision: tag2,
+				localId: brand(10),
+			});
+			assert.deepEqual(
+				new Set(relevantRemovedRoots(change)),
+				new Set([
+					{ id: { major: tag1, minor: 0 }, count: 3 },
+					{ id: { major: tag1, minor: 7 }, count: 3 },
+					{ id: { major: tag2, minor: 0 }, count: 5 },
+				]),
+			);
+		});
+	});
+
 	describe("update refreshers", () => {
 		const aMajor = mintRevisionTag();
 		const a1 = { major: aMajor, minor: 1 };
@@ -1183,9 +1230,14 @@ describe("ModularChangeFamily", () => {
 			nodesArray.map(([{ major, minor }, chunk]) => [major, minor, chunk]),
 		);
 
-		const getDetachedNode = ({ major, minor }: DeltaDetachedNodeId) => {
-			return tryGetFromNestedMap(nodeMap, major, minor);
+		const getDetachedNodes = ({
+			major,
+			minor,
+		}: DeltaDetachedNodeId): RangeQueryResult<TreeChunk | undefined> => {
+			return { value: tryGetFromNestedMap(nodeMap, major, minor), length: 1 };
 		};
+		const ranges = (ids: DeltaDetachedNodeId[]): DetachedNodeRange[] =>
+			ids.map((id) => ({ id, count: 1 }));
 
 		it("preserves no-change constraints", () => {
 			const input: ModularChangeset = {
@@ -1194,7 +1246,7 @@ describe("ModularChangeFamily", () => {
 				noChangeConstraintOnRevert: { violated: false },
 			};
 
-			const updated = updateRefreshers(input, getDetachedNode, []);
+			const updated = updateRefreshers(input, getDetachedNodes, []);
 			assert.deepEqual(updated, input);
 		});
 
@@ -1213,7 +1265,7 @@ describe("ModularChangeFamily", () => {
 				]),
 			};
 
-			const withBuilds = updateRefreshers(input, getDetachedNode, [a2]);
+			const withBuilds = updateRefreshers(input, getDetachedNodes, ranges([a2]));
 			assertEqual(withBuilds, expected);
 		});
 
@@ -1228,7 +1280,7 @@ describe("ModularChangeFamily", () => {
 			};
 
 			const expected: ModularChangeset = Change.empty();
-			const filtered = updateRefreshers(input, getDetachedNode, []);
+			const filtered = updateRefreshers(input, getDetachedNodes, []);
 			assertEqual(filtered, expected);
 		});
 
@@ -1248,9 +1300,11 @@ describe("ModularChangeFamily", () => {
 				]),
 			};
 
-			const withBuilds = updateRefreshers(input, getDetachedNode, [
-				{ major: aMajor, minor: 4 },
-			]);
+			const withBuilds = updateRefreshers(
+				input,
+				getDetachedNodes,
+				ranges([{ major: aMajor, minor: 4 }]),
+			);
 			assertEqual(withBuilds, expected);
 		});
 
@@ -1267,7 +1321,7 @@ describe("ModularChangeFamily", () => {
 					]),
 				};
 
-				const withBuilds = updateRefreshers(input, getDetachedNode, [a1, a2, b1]);
+				const withBuilds = updateRefreshers(input, getDetachedNodes, ranges([a1, a2, b1]));
 				assertEqual(withBuilds, expected);
 			});
 
@@ -1288,7 +1342,7 @@ describe("ModularChangeFamily", () => {
 					]),
 				};
 
-				const filtered = updateRefreshers(input, getDetachedNode, [a1, a2]);
+				const filtered = updateRefreshers(input, getDetachedNodes, ranges([a1, a2]));
 				assertEqual(filtered, expected);
 			});
 
@@ -1311,14 +1365,92 @@ describe("ModularChangeFamily", () => {
 					]),
 				};
 
-				const withBuilds = updateRefreshers(input, getDetachedNode, [a1, a2, b1]);
+				const withBuilds = updateRefreshers(input, getDetachedNodes, ranges([a1, a2, b1]));
 				assertEqual(withBuilds, expected);
 			});
 
 			it("throws if the detached node is not available and requireRefreshers is true", () => {
 				const input: ModularChangeset = Change.empty();
-				assert.throws(() => updateRefreshers(input, getDetachedNode, [{ minor: 2 }]));
+				assert.throws(() => updateRefreshers(input, getDetachedNodes, ranges([{ minor: 2 }])));
 			});
+		});
+
+		for (const count of [3, 1000]) {
+			it(`retrieves ${count} consecutive roots with one callback`, () => {
+				const chunk = chunkFromJsonTrees(Array.from({ length: count }, (_, i) => i));
+				const queries: DetachedNodeRange[] = [];
+				const updated = updateRefreshers(
+					Change.empty(),
+					(id, requestedCount) => {
+						queries.push({ id, count: requestedCount });
+						return { value: chunk, length: count };
+					},
+					[{ id: a1, count }],
+				);
+				assert.deepEqual(queries, [{ id: a1, count }]);
+				assert.equal(updated.refreshers?.size, 1);
+				assert.equal(updated.refreshers.get([aMajor, brand(1)]), chunk);
+			});
+		}
+
+		it("splits at partial build coverage and missing prefixes without overwriting overlaps", () => {
+			const input: ModularChangeset = {
+				...Change.empty(),
+				builds: newChangeAtomIdBTree([[[aMajor, brand(3)], nodesChunk]]),
+			};
+			const queries: DetachedNodeRange[] = [];
+			const updated = updateRefreshers(
+				input,
+				(id, count) => {
+					queries.push({ id, count });
+					switch (id.minor) {
+						case 1: {
+							return { value: nodesChunk, length: 2 };
+						}
+						case 5: {
+							return { value: undefined, length: 2 };
+						}
+						case 7: {
+							return { value: node3Chunk, length: 1 };
+						}
+						default: {
+							assert.fail("Unexpected detached node ID");
+						}
+					}
+				},
+				[
+					{ id: a1, count: 7 },
+					{ id: a2, count: 6 },
+				],
+				false,
+			);
+			assert.deepEqual(queries, [
+				{ id: a1, count: 2 },
+				{ id: { major: aMajor, minor: 5 }, count: 3 },
+				{ id: { major: aMajor, minor: 7 }, count: 1 },
+			]);
+			assert.deepEqual(updated.refreshers?.toArray(), [
+				[[aMajor, 1], nodesChunk],
+				[[aMajor, 7], node3Chunk],
+			]);
+		});
+
+		it("rejects invalid prefixes and mismatched chunk lengths", () => {
+			for (const length of [0, -1, 0.5, 3]) {
+				assert.throws(() =>
+					updateRefreshers(
+						Change.empty(),
+						() => ({ value: undefined, length }),
+						[{ id: a1, count: 2 }],
+						false,
+					),
+				);
+			}
+			assert.throws(() =>
+				updateRefreshers(Change.empty(), () => ({ value: node1Chunk, length: 2 }), [
+					{ id: a1, count: 2 },
+				]),
+			);
 		});
 	});
 
