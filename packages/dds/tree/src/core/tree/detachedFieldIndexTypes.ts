@@ -6,13 +6,27 @@
 import type { Brand, ReadonlyNestedMap } from "../../util/index.js";
 import type { RevisionTag } from "../rebase/index.js";
 
+import type * as Delta from "./delta.js";
+import type { NodeIndex } from "./pathTree.js";
+
 export type Major = RevisionTag | undefined;
 export type Minor = number;
 
 export interface DetachedFieldSummaryData {
-	readonly data: ReadonlyNestedMap<Major, Minor, DetachedField>;
+	readonly data: ReadonlyNestedMap<Major, Minor, DetachedFieldSummaryEntry>;
 	readonly maxId: ForestRootId;
 }
+
+/**
+ * A summary record keyed by its starting detached node ID.
+ * Omitted range metadata denotes a legacy singleton forest field.
+ * Latest relevant revisions are not persisted by the codecs.
+ */
+export type DetachedFieldSummaryEntry = DetachedField &
+	(
+		| { readonly index?: never; readonly count?: never }
+		| { readonly index: NodeIndex; readonly count: number }
+	);
 
 /**
  * ID used to create a detached field key for a removed subtree.
@@ -22,6 +36,42 @@ export interface DetachedFieldSummaryData {
 export type ForestRootId = Brand<number, "tree.ForestRootId">;
 
 /**
+ * The forest field ID and node index of a detached node.
+ * @remarks
+ * This is a snapshot, not a stable handle across mutations to the forest.
+ * Retain detached node IDs and resolve them again after mutations that can move nodes within or between fields.
+ */
+export interface DetachedNodeLocation {
+	/**
+	 * Identifies the whole detached forest field containing the node.
+	 */
+	readonly root: ForestRootId;
+	/**
+	 * The zero-based node index within that field.
+	 */
+	readonly index: NodeIndex;
+}
+
+/**
+ * A nonempty run of consecutive detached node IDs with the same major ID.
+ */
+export interface DetachedNodeRange {
+	readonly id: Delta.DetachedNodeId;
+	readonly count: number;
+}
+
+/**
+ * A run of consecutive detached node IDs at consecutive positions in one field.
+ */
+export interface DetachedFieldRange extends DetachedNodeLocation, DetachedNodeRange {
+	/**
+	 * The latest relevant revision for every node in this run.
+	 * See {@link DetachedField.latestRelevantRevision}.
+	 */
+	readonly latestRelevantRevision?: RevisionTag;
+}
+
+/**
  * A field that is detached from the main document tree.
  */
 export interface DetachedField {
@@ -29,8 +79,8 @@ export interface DetachedField {
 	 * The atomic ID that the `DetachedFieldIndex` uses to uniquely identify the first (and only) root in the field.
 	 * This ID is scoped to the specific `DetachedFieldIndex` from which this object was retrieved.
 	 *
-	 * The current implementation only supports a single root per field.
-	 * This will be changed in the future for performance reasons.
+	 * This legacy representation only supports a single root per field.
+	 * Use {@link DetachedFieldRange} for fields that contain multiple roots.
 	 */
 	readonly root: ForestRootId;
 	/**

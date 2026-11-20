@@ -45,6 +45,8 @@ import {
 	type TreeStoredSchemaSubscription,
 	combineVisitors,
 	makeDetachedFieldIndex,
+	expandDetachedFieldRanges,
+	offsetDetachId,
 	rebaseChange,
 	rootFieldKey,
 	tagChange,
@@ -1501,7 +1503,7 @@ export abstract class CheckoutBase implements ITreeCheckout {
 		// Commits without repair data (such as inserts) need no edit to the forest.
 		const hasRepairData = revisions.some(
 			(revision) =>
-				this._removedRoots.getRootsLastTouchedByRevision(revision)[Symbol.iterator]().next()
+				this._removedRoots.getRangesLastTouchedByRevision(revision)[Symbol.iterator]().next()
 					.done !== true,
 		);
 		if (!hasRepairData) {
@@ -1509,15 +1511,24 @@ export abstract class CheckoutBase implements ITreeCheckout {
 		}
 		this.withCombinedVisitor((visitor) => {
 			for (const revision of revisions) {
-				// get all the roots last created or used by the revision
-				const roots = this._removedRoots.getRootsLastTouchedByRevision(revision);
+				// Get all the ranges last created or used by the revision before deleting any of them.
+				const roots = [...this._removedRoots.getRangesLastTouchedByRevision(revision)];
 
-				// get the detached field for the root and delete it from the removed roots
-				for (const root of roots) {
-					visitor.destroy(this._removedRoots.toFieldKey(root), { start: 0, end: 1 });
+				// Get the detached fields for the ranges and delete them from the removed roots.
+				for (const { id, count } of roots) {
+					for (let offset = 0; offset < count; ) {
+						// Earlier deletions can shift surviving nodes within the same forest field.
+						const { value, length } = this._removedRoots.getFirst(
+							offsetDetachId(id, offset),
+							1,
+						);
+						assert(value !== undefined, "Expected repair data for a trimmed revision");
+						const range = { start: value.index, end: value.index + length };
+						visitor.destroy(this._removedRoots.toFieldKey(value.root), range);
+						this._removedRoots.deleteRange(value.root, range);
+						offset += length;
+					}
 				}
-
-				this._removedRoots.deleteRootsLastTouchedByRevision(revision);
 			}
 		});
 	};
@@ -2060,13 +2071,16 @@ export abstract class CheckoutBase implements ITreeCheckout {
 		this.assertNoUntrackedRoots();
 		const trees: [string | number | undefined, number, JsonableTree][] = [];
 		const cursor = this.forest.allocateCursor("getRemovedRoots");
-		for (const { id, root } of this._removedRoots.entries()) {
+		for (const { id, root, index } of expandDetachedFieldRanges(this._removedRoots.ranges())) {
 			const parentField = this._removedRoots.toFieldKey(root);
-			this.forest.moveCursorToPath({ parent: undefined, parentField, parentIndex: 0 }, cursor);
-			const tree = jsonableTreeFromCursor(cursor);
 			// This method is used for tree consistency comparison.
 			const { major, minor } = id;
 			const finalizedMajor = major === undefined ? major : this.revisionTagCodec.encode(major);
+			this.forest.moveCursorToPath(
+				{ parent: undefined, parentField, parentIndex: index },
+				cursor,
+			);
+			const tree = jsonableTreeFromCursor(cursor);
 			trees.push([finalizedMajor, minor, tree]);
 		}
 		cursor.free();
@@ -2182,7 +2196,7 @@ export abstract class CheckoutBase implements ITreeCheckout {
 	private assertNoUntrackedRoots(): void {
 		const cursor = this.forest.getCursorAboveDetachedFields();
 		const rootFields = new Set([rootFieldKey]);
-		for (const { root } of this._removedRoots.entries()) {
+		for (const { root } of this._removedRoots.ranges()) {
 			rootFields.add(this._removedRoots.toFieldKey(root));
 		}
 

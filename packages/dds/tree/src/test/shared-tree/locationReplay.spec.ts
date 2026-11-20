@@ -17,6 +17,7 @@ import {
 	makeDetachedFieldIndex,
 	applyDelta,
 	createAnnouncedVisitor,
+	expandDetachedFieldRanges,
 	tagChange,
 } from "../../core/index.js";
 import { intoDelta } from "../../feature-libraries/index.js";
@@ -38,7 +39,7 @@ describe("LocationReplay", () => {
 	it("tracks virtual end gaps and deletion collapse without creating any forest", () => {
 		const detached = makeDetachedFieldIndex();
 		for (let i = 0; i < 3; i++) {
-			detached.createEntry({ minor: i }, undefined);
+			detached.createRange({ minor: i }, undefined);
 		}
 		const replay = new LocationReplay(detached);
 		const before = replay.track(array, { index: 0, affinity: "before" });
@@ -82,7 +83,7 @@ describe("LocationReplay", () => {
 
 	it("can seed repair roots that predate the replay and rename them before attaching", () => {
 		const detached = makeDetachedFieldIndex();
-		detached.createEntry({ minor: 0 }, undefined);
+		detached.createRange({ minor: 0 }, undefined);
 		const replay = new LocationReplay(detached);
 		const gap = replay.track(array, { index: 1, affinity: "after" });
 		replay.apply(
@@ -134,7 +135,7 @@ describe("LocationReplay", () => {
 		it(`tracks renames when an intermediate ID ${intermediateExisted ? "existed" : "did not exist"}`, () => {
 			const current = makeDetachedFieldIndex();
 			if (intermediateExisted) {
-				current.createEntry({ minor: 1 }, undefined);
+				current.createRange({ minor: 1 }, undefined);
 			}
 			const replay = new LocationReplay(current);
 			const node = replay.track(array);
@@ -169,7 +170,9 @@ describe("rewindDetachedRoots", () => {
 	class Text extends sf.array("Text", sf.string) {}
 	class Document extends sf.object("Document", { left: Text, right: Text }) {}
 	const identities = (index: ReadOnlyDetachedFieldIndex): string[] =>
-		[...index.clone().entries()].map(({ id }) => JSON.stringify([id.major, id.minor])).sort();
+		[...expandDetachedFieldRanges(index.clone().ranges())]
+			.map(({ id }) => JSON.stringify([id.major, id.minor]))
+			.sort();
 
 	for (const operation of [
 		"insert",

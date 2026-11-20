@@ -127,11 +127,18 @@ export {
 
 export {
 	DetachedFieldIndex,
+	expandDetachedFieldRanges,
 	type DetachedFieldIndexCheckpoint,
 	type ReadOnlyDetachedFieldIndex,
 } from "./detachedFieldIndex.js";
 
-export { type DetachedFieldSummaryData } from "./detachedFieldIndexTypes.js";
+export {
+	type DetachedFieldSummaryData,
+	type DetachedFieldSummaryEntry,
+	type DetachedFieldRange,
+	type DetachedNodeLocation,
+	type DetachedNodeRange,
+} from "./detachedFieldIndexTypes.js";
 
 export { detachedFieldIndexCodecBuilder } from "./detachedFieldIndexCodecs.js";
 export { DetachedFieldIndexFormatVersion } from "./detachedFieldIndexFormatCommon.js";

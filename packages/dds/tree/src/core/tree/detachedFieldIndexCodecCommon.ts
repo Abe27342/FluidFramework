@@ -3,6 +3,7 @@
  * Licensed under the MIT License.
  */
 
+import { assert } from "@fluidframework/core-utils/internal";
 import type { Static, TSchema } from "typebox";
 import * as Type from "typebox/type";
 
@@ -38,6 +39,17 @@ export function makeDetachedFieldIndexCodecFromMajorCodec<
 	return {
 		schema: formatSchema,
 		encode: (data: DetachedFieldSummaryData): Static<typeof formatSchema> => {
+			const fields = new Set<number>();
+			for (const innerMap of data.data.values()) {
+				for (const entry of innerMap.values()) {
+					assert(
+						(entry.count === undefined || (entry.count === 1 && entry.index === 0)) &&
+							!fields.has(entry.root),
+						"Legacy detached field formats cannot encode grouped fields",
+					);
+					fields.add(entry.root);
+				}
+			}
 			const rootsForRevisions: EncodedRootsForRevision<typeof revisionTagSchema>[] = [];
 			for (const [major, innerMap] of data.data) {
 				const encodedRevision = majorCodec.encode(major);
