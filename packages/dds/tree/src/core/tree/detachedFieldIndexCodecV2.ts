@@ -15,7 +15,7 @@ import { DetachedFieldIndexFormatVersion } from "./detachedFieldIndexFormatCommo
 import { StableOrFinalRevisionTag } from "./detachedFieldIndexFormatV2.js";
 import type { DetachedFieldSummaryData, Major } from "./detachedFieldIndexTypes.js";
 
-class MajorCodec implements IJsonCodec<Major> {
+export class MajorCodec implements IJsonCodec<Major> {
 	public constructor(
 		private readonly revisionTagCodec: RevisionTagCodec,
 		private readonly idCompressor: IIdCompressor,

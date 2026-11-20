@@ -16,6 +16,12 @@ import type { ForestRootId } from "./detachedFieldIndexTypes.js";
 export const DetachedFieldIndexFormatVersion = strictEnum("DetachedFieldIndexFormatVersion", {
 	v1: 1,
 	v2: 2,
+	/**
+	 * Experimental ranges of detached node IDs within forest fields.
+	 * Writing requires an explicit override and acknowledgment that all required readers support it.
+	 * Promotion to a released minimum collaboration version is a separate compatibility decision.
+	 */
+	vRangeExperimental: "vRangeExperimental",
 });
 export type DetachedFieldIndexFormatVersion = Values<typeof DetachedFieldIndexFormatVersion>;
 
