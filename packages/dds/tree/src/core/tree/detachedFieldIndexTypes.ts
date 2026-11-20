@@ -38,7 +38,7 @@ export type ForestRootId = Brand<number, "tree.ForestRootId">;
 /**
  * The forest field ID and node index of a detached node.
  * @remarks
- * This is a snapshot, not a stable handle.
+ * This is a snapshot, not a stable handle across mutations to the forest.
  * Retain detached node IDs and resolve them again after mutations that can move nodes within or between fields.
  */
 export interface DetachedNodeLocation {
