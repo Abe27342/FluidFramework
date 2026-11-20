@@ -34,7 +34,8 @@ import type { Range } from "./pathTree.js";
 import { getDetachedFieldSummaryRanges } from "./detachedFieldIndexValidation.js";
 
 /**
- * Readonly interface for {@link DetachedFieldIndex}.
+ * Readonly view of the detached-node identity and forest-location mapping described by {@link DetachedFieldIndex}.
+ * Queries use either detached node IDs or forest field IDs and node indices; these are distinct coordinate systems.
  */
 export interface ReadOnlyDetachedFieldIndex {
 	/**
@@ -92,10 +93,28 @@ export interface ReadOnlyDetachedFieldIndex {
 export type DetachedFieldIndexCheckpoint = () => void;
 
 /**
- * Maps detached node IDs to forest field IDs and node indices.
+ * Tracks the identities, forest locations, and retention revisions of detached root nodes.
  * @remarks
+ * A detached node ID combines an optional revision (`major`) with a node identifier scoped to that revision (`minor`).
+ * A forest location is a field ID (`root`) and a zero-based node index within that field (`index`).
+ * The field ID identifies the entire detached field, not an individual node or chunk.
+ * {@link toFieldKey} converts it to the key used by forest visitors and cursors.
+ *
+ * A range record starting at `id`, with location `(root, index)` and length `count`,
+ * maps each `{ major: id.major, minor: id.minor + offset }` to `(root, index + offset)` for `0 <= offset < count`.
+ * Every node in a tracked field has exactly one detached node ID, and the records for that field cover its node indices without gaps or overlaps.
+ * The index tracks only registered detached fields, not the document's root field or descendants within the detached subtrees.
+ *
+ * {@link createRange} reserves one new field ID and registers the whole field as one consecutive ID range starting at node index zero.
+ * Removing nodes compacts the remaining field indices without renumbering surviving detached node IDs.
+ * Consequently, a field can contain several ID runs, such as `[a, d, e]` after removing `[b, c]` from `[a, b, c, d, e]`.
+ * Updating retention revisions can also split records without moving nodes.
+ * Range records are bookkeeping boundaries, not forest chunk boundaries.
+ *
+ * This index owns neither forest content nor chunk references and never edits the forest.
+ * Callers coordinate forest edits with matching index updates; saved forest locations must be resolved again after edits that can move nodes.
  * This index supports ranges independently of how callers create forest fields.
- * Callers coordinate forest edits with index updates; serialization codecs enforce their own format restrictions.
+ * Serialization codecs enforce their own format restrictions.
  */
 export class DetachedFieldIndex implements ReadOnlyDetachedFieldIndex {
 	/**
@@ -322,6 +341,13 @@ export class DetachedFieldIndex implements ReadOnlyDetachedFieldIndex {
 	/**
 	 * Registers consecutive detached node IDs under one newly allocated forest field ID.
 	 * This only registers the mapping; the caller must create or transfer the corresponding forest content.
+	 * @param id - The first detached node ID. The next `count - 1` IDs have the same major component and increasing minor components.
+	 * None of these IDs may already be registered.
+	 * @param revision - The latest relevant revision for every registered node, used for retention.
+	 * This is independent of the major component of `id`.
+	 * @param count - The positive safe-integer number of nodes in the new field.
+	 * @returns The new field ID. Its nodes occupy indices `[0, count)` in detached node ID order.
+	 * This does not append to an existing field or allocate new detached node IDs; the caller supplies those IDs.
 	 */
 	public createRange(
 		id: Delta.DetachedNodeId,
@@ -352,9 +378,16 @@ export class DetachedFieldIndex implements ReadOnlyDetachedFieldIndex {
 	}
 
 	/**
-	 * Updates bookkeeping after a successful removal from a forest field, using pre-removal node indices.
+	 * Records the removal of nodes from a forest field, using pre-removal node indices.
 	 * Surviving nodes keep their detached node IDs and lifetimes, but suffix positions shift left.
 	 * This does not edit the forest.
+	 * @param root - The ID of the tracked field from which nodes are removed.
+	 * @param range - The half-open interval of node indices before removal, not a detached node ID range.
+	 * The interval must be within the tracked field and can cross several ID runs or retention revisions.
+	 * @remarks
+	 * Removes the mappings and retention records for the selected nodes.
+	 * Each surviving node at or after `range.end` has its index reduced by `range.end - range.start`.
+	 * Removing the entire field removes its records from the index; an empty interval leaves the index unchanged.
 	 */
 	public deleteRange(root: ForestRootId, range: Range): void {
 		this.getFieldRanges(root, range);
