@@ -19,13 +19,13 @@ import {
 } from "../core/index.js";
 import {
 	type TreeChunk,
-	chunkTree,
+	chunkFieldRange,
 	defaultChunkPolicy,
 	intoDelta,
 	relevantRemovedRoots,
 	updateRefreshers as updateDataChangeRefreshers,
 } from "../feature-libraries/index.js";
-import { disposeSymbol } from "../util/index.js";
+import { disposeSymbol, type RangeQueryResult } from "../util/index.js";
 
 import { updateRefreshers } from "./sharedTreeChangeFamily.js";
 import type { SharedTreeChange } from "./sharedTreeChangeTypes.js";
@@ -93,28 +93,34 @@ export class SharedTreeChangeEnricher {
 		this.onEnrichCommit?.();
 		return updateRefreshers(
 			change,
-			(id) => this.getDetachedRoot(id),
+			(id, count) => this.getDetachedRoots(id, count),
 			relevantRemovedRoots,
 			updateDataChangeRefreshers,
 		);
 	}
 
-	private getDetachedRoot(id: DeltaDetachedNodeId): TreeChunk | undefined {
+	private getDetachedRoots(
+		id: DeltaDetachedNodeId,
+		count: number,
+	): RangeQueryResult<TreeChunk | undefined> {
 		this.purgeChangeQueue();
 		const state = this.owned ?? this.borrowed;
-		const location = state.removedRoots.tryGetLocation(id);
+		const { value: location, length } = state.removedRoots.getFirst(id, count);
 		if (location !== undefined) {
 			const cursor = state.forest.getCursorAboveDetachedFields();
 			const parentField = state.removedRoots.toFieldKey(location.root);
 			cursor.enterField(parentField);
-			cursor.enterNode(location.index);
 			this.onRefresherAdded?.();
-			return chunkTree(cursor, {
-				policy: defaultChunkPolicy,
-				idCompressor: this.idCompressor,
-			});
+			return {
+				value: chunkFieldRange(
+					cursor,
+					{ policy: defaultChunkPolicy, idCompressor: this.idCompressor },
+					{ start: location.index, end: location.index + length },
+				),
+				length,
+			};
 		}
-		return undefined;
+		return { value: undefined, length };
 	}
 
 	/**
