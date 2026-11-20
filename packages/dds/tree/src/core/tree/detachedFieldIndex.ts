@@ -108,6 +108,15 @@ export type DetachedFieldIndexCheckpoint = () => void;
  * {@link createRange} reserves one new field ID and registers the whole field as one consecutive ID range starting at node index zero.
  * Removing nodes compacts the remaining field indices without renumbering surviving detached node IDs.
  * Consequently, a field can contain several ID runs, such as `[a, d, e]` after removing `[b, c]` from `[a, b, c, d, e]`.
+ * Note that those IDs are actually represented as runs.
+ * Concretely, this kind of thing can occur in the following user scenario: client A removes 5 nodes from a field,
+ * and client B concurrently removes 2 of the nodes in the middle of that range. A's edit is applied first, followed by B's rebased edit.
+ * Each edit allocates a new detached field for the removed nodes.
+ * The detached field index after A's edit conceptually associates forest location "detachedFieldA" with minor ids [0, 1, 2, 3, 4].
+ * This is represented with the range [{ major: revisionA, minor: 0, count: 5 }].
+ * B's edit then associates forest location "detachedFieldB" with [{ major: B, minor: 0, count: 2 }], and also updates "detachedFieldA"'s mapping to
+ * [{ major: A, minor: 0, count: 1 }, { major: A, minor: 3, count: 2 }]
+ *
  * Updating retention revisions can also split records without moving nodes.
  * Range records are bookkeeping boundaries, not forest chunk boundaries.
  *
@@ -115,6 +124,10 @@ export type DetachedFieldIndexCheckpoint = () => void;
  * Callers coordinate forest edits with matching index updates; saved forest locations must be resolved again after edits that can move nodes.
  * This index supports ranges independently of how callers create forest fields.
  * Serialization codecs enforce their own format restrictions.
+ *
+ * @privateRemarks
+ * This range design aims to make DetachedFieldIndex's asymptotics depend on number of edits in the collab window (counting e.g. squashed transactions of many edits as multiple edits rather than 1)
+ * rather than the number of nodes edited. It is an improvement over previous implementations that required unique forest ids for each detached node.
  */
 export class DetachedFieldIndex implements ReadOnlyDetachedFieldIndex {
 	/**
@@ -147,6 +160,9 @@ export class DetachedFieldIndex implements ReadOnlyDetachedFieldIndex {
 	 * See {@link DetachedField.latestRelevantRevision}.
 	 *
 	 * @remarks
+	 * These sets contain the same immutable record instances as {@link fieldToRanges}.
+	 * {@link replaceField} removes those instances before inserting their replacements; queries return copies.
+	 *
 	 * undefined revisions are tolerated but any roots not associated with a revision must be disposed manually
 	 */
 	private readonly latestRelevantRevisionToFields = new Map<
@@ -466,6 +482,8 @@ export class DetachedFieldIndex implements ReadOnlyDetachedFieldIndex {
 
 	/**
 	 * Replaces one field's records in every index view, coalescing compatible neighbors.
+	 *
+	 * @remarks
 	 * Work is proportional to the field's fragmentation, not its node count.
 	 */
 	private replaceField(root: ForestRootId, records: readonly DetachedFieldRange[]): void {
