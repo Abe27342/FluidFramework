@@ -390,6 +390,7 @@ export function createTreeCheckout(
 		forest?: IEditableForest;
 		fieldBatchCodec?: FieldBatchCodec;
 		removedRoots?: DetachedFieldIndex;
+		allowGroupedDetaches?: boolean;
 		chunkCompressionStrategy?: TreeCompressionStrategy;
 		codecOptions?: Partial<CodecWriteOptions>;
 		/**
@@ -444,6 +445,7 @@ export function createTreeCheckout(
 		idCompressor,
 		jsonValidator: codecOptions.jsonValidator,
 		removedRoots: args?.removedRoots,
+		allowGroupedDetaches: args?.allowGroupedDetaches,
 		disposeForksAfterTransaction: true,
 		getFinalizedCommit: args?.getFinalizedCommit,
 	});
@@ -613,6 +615,13 @@ export interface TreeCheckoutOptions {
 	readonly removedRoots?: DetachedFieldIndex;
 
 	/**
+	 * Whether delta application may create multi-root detached fields.
+	 * The owner must ensure its summary writer supports those fields. Defaults to false.
+	 * This policy does not restrict reading existing grouped content.
+	 */
+	readonly allowGroupedDetaches?: boolean;
+
+	/**
 	 * Whether to dispose forks created during a transaction when that transaction ends.
 	 * Defaults to true.
 	 */
@@ -769,6 +778,7 @@ export abstract class CheckoutBase implements ITreeCheckout {
 	private readonly idCompressor: IIdCompressor;
 	private readonly jsonValidator: FormatValidator;
 	private readonly _removedRoots: DetachedFieldIndex;
+	private readonly allowGroupedDetaches: boolean;
 	/**
 	 * {@inheritDoc TreeCheckoutOptions.disposeForksAfterTransaction}
 	 */
@@ -795,6 +805,7 @@ export abstract class CheckoutBase implements ITreeCheckout {
 		idCompressor,
 		jsonValidator,
 		removedRoots = makeDetachedFieldIndex("repair"),
+		allowGroupedDetaches = false,
 		disposeForksAfterTransaction = true,
 		getFinalizedCommit,
 	}: TreeCheckoutOptions) {
@@ -808,6 +819,7 @@ export abstract class CheckoutBase implements ITreeCheckout {
 		this.idCompressor = idCompressor;
 		this.jsonValidator = jsonValidator;
 		this._removedRoots = removedRoots;
+		this.allowGroupedDetaches = allowGroupedDetaches;
 		this.disposeForksAfterTransaction = disposeForksAfterTransaction;
 		this.getFinalizedCommitOverride = getFinalizedCommit;
 		this.serializedChangeCodec = makeSerializedChangeCodec(
@@ -1457,7 +1469,7 @@ export abstract class CheckoutBase implements ITreeCheckout {
 			if (innerChange.type === "data") {
 				const delta = intoDelta(tagChange(innerChange.innerChange, revision));
 				this.withCombinedVisitor((visitor) => {
-					visitDelta(delta, visitor, this._removedRoots, revision);
+					visitDelta(delta, visitor, this._removedRoots, revision, this.allowGroupedDetaches);
 				});
 			} else if (innerChange.type === "schema") {
 				// Schema changes from a current to a new schema are expected to be backwards compatible.
@@ -1520,7 +1532,7 @@ export abstract class CheckoutBase implements ITreeCheckout {
 						// Earlier deletions can shift surviving nodes within the same forest field.
 						const { value, length } = this._removedRoots.getFirst(
 							offsetDetachId(id, offset),
-							1,
+							count - offset,
 						);
 						assert(value !== undefined, "Expected repair data for a trimmed revision");
 						const range = { start: value.index, end: value.index + length };
@@ -1782,6 +1794,7 @@ export abstract class CheckoutBase implements ITreeCheckout {
 			idCompressor: this.idCompressor,
 			jsonValidator: this.jsonValidator,
 			removedRoots: this._removedRoots.clone(),
+			allowGroupedDetaches: this.allowGroupedDetaches,
 		});
 		this.#events.emit("fork", checkout);
 		return checkout;
@@ -2328,6 +2341,7 @@ export abstract class CheckoutBase implements ITreeCheckout {
 			() => (this.enrichmentStats.refreshers += 1),
 			() => (this.enrichmentStats.forks += 1),
 			() => (this.enrichmentStats.applied += 1),
+			this.allowGroupedDetaches,
 		);
 		// This `lastCommitApplied` may be on the main branch or on a transaction branch.
 		// In either case, it is crucial that the state of the forest & detached field index reflects all changes up to and including this commit.

@@ -63,6 +63,7 @@ export class SharedTreeChangeEnricher {
 	 * @param onRefresherAdded - Optional callback invoked whenever a refresher is added during enrichment.
 	 * @param onForkState - Optional callback invoked whenever the enricher forks its state.
 	 * @param onApplyChange - Optional callback invoked whenever a change is applied to the owned state.
+	 * @param allowGroupedDetaches - The owning checkout's field-creation policy for replayed changes.
 	 */
 	public constructor(
 		borrowedForest: IForestSubscription,
@@ -73,6 +74,7 @@ export class SharedTreeChangeEnricher {
 		private readonly onRefresherAdded?: () => void,
 		private readonly onForkState?: () => void,
 		private readonly onApplyChange?: () => void,
+		private readonly allowGroupedDetaches: boolean = false,
 	) {
 		this.borrowed = {
 			forest: borrowedForest,
@@ -151,7 +153,13 @@ export class SharedTreeChangeEnricher {
 					case "data": {
 						const delta = intoDelta(tagChange(dataOrSchemaChange.innerChange, revision));
 						const visitor = this.owned.forest.acquireVisitor();
-						visitDelta(delta, visitor, this.owned.removedRoots, revision);
+						visitDelta(
+							delta,
+							visitor,
+							this.owned.removedRoots,
+							revision,
+							this.allowGroupedDetaches,
+						);
 						visitor.free();
 						break;
 					}
