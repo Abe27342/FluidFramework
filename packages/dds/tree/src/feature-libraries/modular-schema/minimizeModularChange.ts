@@ -6,6 +6,7 @@
 import {
 	cheapRebaseValidation,
 	deltaFieldMapHasChanges,
+	expandDetachedFieldRanges,
 	makeAnonChange,
 	makeChangeAtomId,
 	makeDetachedFieldIndex,
@@ -19,7 +20,8 @@ import {
 	type IEditableForest,
 	type TreeChunk,
 } from "../../core/index.js";
-import { brand, hasSingle, type Mutable, type RangeQueryResult } from "../../util/index.js";
+import { brand, type Mutable, type RangeQueryResult } from "../../util/index.js";
+import { chunkTree, defaultChunkPolicy } from "../chunked-forest/index.js";
 import {
 	getFromChangeAtomIdMap,
 	newChangeAtomIdBTree,
@@ -596,15 +598,8 @@ class ModularChangeMinimizer {
 		visitDelta(deltaForBuilds, forest.acquireVisitor(), detachedFieldIndex, undefined);
 		const squashedBuilds = newChangeAtomIdBTree<TreeChunk>();
 		const cursor = forest.getCursorAboveDetachedFields();
-		for (const entry of detachedFieldIndex.entries()) {
+		for (const entry of expandDetachedFieldRanges(detachedFieldIndex.ranges())) {
 			cursor.enterField(detachedFieldIndex.toFieldKey(entry.root));
-			const chunks = forest.chunkField(cursor);
-
-			// Delta visiting currently splits ranges of nodes into individual elements,
-			// so for now we will not have more than one node in a detached field.
-			assert(hasSingle(chunks), 0xd39 /* TODO: Handle multiple chunks */);
-			const chunk = chunks[0];
-			assert(chunk.topLevelLength === 1, 0xd3a /* TODO: Handle chunk with range of nodes */);
 
 			const rootId: ChangeAtomId = {
 				revision: entry.id.major,
@@ -615,16 +610,22 @@ class ModularChangeMinimizer {
 				residualChange.crossFieldKeys,
 				residualChange.rootNodes,
 				rootId,
-				chunk.topLevelLength,
+				1,
 			);
 			assert(
-				attachEntry.length === chunk.topLevelLength,
+				attachEntry.length === 1,
 				0xd3b /* TODO: Handle chunks which are only partially attached */,
 			);
 
 			const isAttached = attachEntry.value !== undefined;
 			if (isAttached) {
-				setInChangeAtomIdMap(squashedBuilds, rootId, chunk);
+				cursor.enterNode(entry.index);
+				setInChangeAtomIdMap(
+					squashedBuilds,
+					rootId,
+					chunkTree(cursor, { policy: defaultChunkPolicy, idCompressor: undefined }),
+				);
+				cursor.exitNode();
 			}
 
 			cursor.exitField();
