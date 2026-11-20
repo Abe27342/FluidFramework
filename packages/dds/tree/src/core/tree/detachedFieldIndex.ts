@@ -113,9 +113,9 @@ export type DetachedFieldIndexCheckpoint = () => void;
  * and client B concurrently removes 2 of the nodes in the middle of that range. A's edit is applied first, followed by B's rebased edit.
  * Each edit allocates a new detached field for the removed nodes.
  * The detached field index after A's edit conceptually associates forest location "detachedFieldA" with minor ids [0, 1, 2, 3, 4].
- * This is represented with the range [{ major: revisionA, minor: 0, count: 5 }].
- * B's edit then associates forest location "detachedFieldB" with [{ major: B, minor: 0, count: 2 }], and also updates "detachedFieldA"'s mapping to
- * [{ major: A, minor: 0, count: 1 }, { major: A, minor: 3, count: 2 }]
+ * This is represented with the range `[{ major: revisionA, minor: 0, count: 5 }]`.
+ * B's edit then associates forest location "detachedFieldB" with `[{ major: B, minor: 0, count: 2 }]`, and also updates "detachedFieldA"'s mapping to
+ * `[{ major: A, minor: 0, count: 1 }, { major: A, minor: 3, count: 2 }]`
  *
  * Updating retention revisions can also split records without moving nodes.
  * Range records are bookkeeping boundaries, not forest chunk boundaries.
