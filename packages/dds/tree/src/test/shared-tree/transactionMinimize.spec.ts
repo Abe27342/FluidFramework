@@ -1802,6 +1802,27 @@ const schemaUpgradeScenarios = {
 // #endregion
 
 describe("transaction minimize post-processor", () => {
+	it("keeps a moved range from a transient built subtree in one build", () => {
+		const tags = Array.from({ length: 128 }, (_, index) => `tag-${index}`);
+		const scenario: TransactionScenario<typeof BoxArray, void> = {
+			schema: BoxArray,
+			initialContent: () => [new Box({ tags: [] })],
+			expectSurvivingMarker: false,
+			apply(root) {
+				const source = new Box({ tags });
+				root.insertAtEnd(source);
+				const destinationTags = root[0].tags;
+				assert(destinationTags !== undefined);
+				assert(source.tags !== undefined);
+				destinationTags.moveRangeToEnd(16, 112, source.tags);
+				root.removeAt(1);
+			},
+		};
+		const { view } = runScenario(scenario, { validateConsistency: true });
+		assert.deepEqual([...(view.root[0].tags ?? [])], tags.slice(16, 112));
+		assert.deepEqual(countBuilds(getHeadChange(view)), { builds: 1, tops: 96 });
+	});
+
 	it("can be supplied as a transaction post-processor without error", () => {
 		const { view } = runScenario(arrayScenarios.A_inserted);
 		assert.deepEqual([...view.root], ["A❤️"]);

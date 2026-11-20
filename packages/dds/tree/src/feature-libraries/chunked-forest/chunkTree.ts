@@ -267,6 +267,47 @@ export function chunkField(
 }
 
 /**
+ * Gets one owned chunk reference for a range of nodes in the current field.
+ * The cursor starts and ends in field mode.
+ * Only chunks that intersect the range are read, and partial uniform chunks retain their shape and value encoding.
+ */
+export function chunkFieldRange(
+	cursor: ITreeCursorSynchronous,
+	policy: ChunkCompressor,
+	range: IndexRange,
+): TreeChunk {
+	assertNonNegativeSafeInteger(range.start);
+	assertNonNegativeSafeInteger(range.end);
+	assert(
+		range.start <= range.end && range.end <= cursor.getFieldLength(),
+		"Chunk range must be within the current field",
+	);
+	if (range.start === range.end) {
+		return combineChunks([]);
+	}
+
+	cursor.enterNode(range.start);
+	const firstChunkStart = cursor.chunkStart;
+	cursor.seekNodes(range.end - 1 - cursor.fieldIndex);
+	const lastChunkEnd = cursor.chunkStart + cursor.chunkLength;
+	cursor.seekNodes(firstChunkStart - cursor.fieldIndex);
+	const chunks = chunkRange(cursor, policy, lastChunkEnd - firstChunkStart, false);
+	if (cursor.mode === CursorLocationType.Nodes) {
+		cursor.exitNode();
+	}
+
+	// Splitting the start first prevents the end split from shifting its saved chunk index.
+	const start = splitFieldAtIndex(chunks, range.start - firstChunkStart, policy);
+	const end = splitFieldAtIndex(chunks, range.end - firstChunkStart, policy);
+	for (const [index, chunk] of chunks.entries()) {
+		if (index < start || index >= end) {
+			chunk.referenceRemoved();
+		}
+	}
+	return combineChunks(chunks.slice(start, end));
+}
+
+/**
  * Get a TreeChunk for the current field (and its children) of cursor.
  * Like {@link chunkField}, but forces the results into a single TreeChunk.
  */

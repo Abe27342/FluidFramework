@@ -5,7 +5,7 @@
 
 import { assert, fail, unreachableCase } from "@fluidframework/core-utils/internal";
 import { UsageError } from "@fluidframework/telemetry-utils/internal";
-import { BTree } from "@tylerbu/sorted-btree-es6";
+import type { BTree } from "@tylerbu/sorted-btree-es6";
 import { lt } from "semver-ts";
 
 import {
@@ -20,6 +20,7 @@ import {
 	type ChangeRebaser,
 	type ChangesetLocalId,
 	type DeltaDetachedNodeId,
+	type DetachedNodeRange,
 	EditBuilder,
 	type FieldKey,
 	type FieldKindIdentifier,
@@ -54,7 +55,6 @@ import {
 	brand,
 	idAllocatorFromMaxId,
 	idAllocatorFromState,
-	getOrCreate,
 	mergeTupleBTrees,
 	type TupleBTree,
 	RangeMap,
@@ -1799,7 +1799,7 @@ function composeBuildsDestroysAndRefreshers(
 }
 
 /**
- * Returns the set of removed roots that should be in memory for the given change to be applied.
+ * Returns ranges of detached node IDs that should be in memory for the given change to be applied.
  * A removed root is relevant if any of the following is true:
  * - It is being inserted
  * - It is being restored
@@ -1813,9 +1813,7 @@ function composeBuildsDestroysAndRefreshers(
  * @param change - The change to be applied.
  * @param fieldKinds - The field kinds to delegate to.
  */
-export function* relevantRemovedRoots(
-	change: ModularChangeset,
-): Iterable<DeltaDetachedNodeId> {
+export function* relevantRemovedRoots(change: ModularChangeset): Iterable<DetachedNodeRange> {
 	const rootIds: ChangeAtomIdRangeMap<boolean> = newChangeAtomIdRangeMap();
 	addAttachesToSet(change, rootIds);
 	addRenamesToSet(change, rootIds);
@@ -1824,11 +1822,26 @@ export function* relevantRemovedRoots(
 		rootIds.set({ revision, localId }, 1, true);
 	}
 
-	for (const entry of rootIds.entries()) {
-		for (let offset = 0; offset < entry.length; offset++) {
-			const detachId = offsetChangeAtomId(entry.start, offset);
-			yield makeDetachedNodeId(detachId.revision, detachId.localId);
+	let previous: DetachedNodeRange | undefined;
+	for (const { start, length } of rootIds.entries()) {
+		if (
+			previous !== undefined &&
+			previous.id.major === start.revision &&
+			previous.id.minor + previous.count === start.localId
+		) {
+			previous = { id: previous.id, count: previous.count + length };
+		} else {
+			if (previous !== undefined) {
+				yield previous;
+			}
+			previous = {
+				id: makeDetachedNodeId(start.revision, start.localId),
+				count: length,
+			};
 		}
+	}
+	if (previous !== undefined) {
+		yield previous;
 	}
 }
 
@@ -1887,7 +1900,10 @@ function addRenamesToSet(
  * removes any refreshers from the provided change that are not relevant to the change.
  *
  * @param change - The change that possibly has missing or superfluous refreshers. Not mutated by this function.
- * @param getDetachedNode - The function to retrieve a tree chunk from the corresponding detached node id.
+ * @param getDetachedNodes - Retrieves a nonempty prefix of the requested detached node IDs.
+ * The returned length must not exceed the requested count.
+ * A defined value transfers one owned chunk reference, whose top-level length must equal the returned length.
+ * An undefined value identifies a missing prefix.
  * @param removedRoots - The set of removed roots that should be in memory for the given change to be applied.
  * Can be retrieved by calling {@link relevantRemovedRoots}.
  * @param requireRefreshers - when true, this function enforces that all relevant removed roots have a
@@ -1895,43 +1911,56 @@ function addRenamesToSet(
  */
 export function updateRefreshers(
 	change: ModularChangeset,
-	getDetachedNode: (id: DeltaDetachedNodeId) => TreeChunk | undefined,
-	removedRoots: Iterable<DeltaDetachedNodeId>,
+	getDetachedNodes: (
+		id: DeltaDetachedNodeId,
+		count: number,
+	) => RangeQueryResult<TreeChunk | undefined>,
+	removedRoots: Iterable<DetachedNodeRange>,
 	requireRefreshers: boolean = true,
 ): ModularChangeset {
 	const refreshers = newChangeAtomIdBTree<TreeChunk>();
-	const chunkLengths: Map<RevisionTag | undefined, BTree<number, number>> = new Map();
+	const coveredRoots = newChangeAtomIdRangeMap<boolean>();
 
 	if (change.builds !== undefined) {
 		for (const [[revision, id], chunk] of change.builds.entries()) {
-			const lengthTree = getOrCreate(chunkLengths, revision, () => new BTree());
-			lengthTree.set(id, chunk.topLevelLength);
+			coveredRoots.set({ revision, localId: id }, chunk.topLevelLength, true);
 		}
 	}
 
-	for (const root of removedRoots) {
-		if (change.builds !== undefined) {
-			const lengthTree = chunkLengths.get(root.major);
-
-			if (lengthTree !== undefined) {
-				const lengthPair = lengthTree.getPairOrNextLower(root.minor);
-				if (lengthPair !== undefined) {
-					const [firstMinor, length] = lengthPair;
-
-					// if the root minor is within the length of the minor of the retrieved pair
-					// then there's no need to check for the detached node
-					if (root.minor < firstMinor + length) {
-						continue;
-					}
-				}
+	for (const { id, count } of removedRoots) {
+		let offset = 0;
+		while (offset < count) {
+			const start = {
+				revision: id.major,
+				localId: brand<ChangesetLocalId>(id.minor + offset),
+			};
+			const covered = coveredRoots.getFirst(start, count - offset);
+			if (covered.value !== undefined) {
+				// If the detached node IDs are already covered by builds or earlier queries,
+				// then there's no need to retrieve their content.
+				offset += covered.length;
+				continue;
 			}
-		}
 
-		const node = getDetachedNode(root);
-		if (node === undefined) {
-			assert(!requireRefreshers, 0x8cd /* detached node should exist */);
-		} else {
-			refreshers.set([root.major, brand(root.minor)], node);
+			const { value: nodes, length } = getDetachedNodes(
+				makeDetachedNodeId(start.revision, start.localId),
+				covered.length,
+			);
+			assert(
+				Number.isSafeInteger(length) && length > 0 && length <= covered.length,
+				"Detached nodes must cover a nonempty prefix of the requested range",
+			);
+			if (nodes === undefined) {
+				assert(!requireRefreshers, 0x8cd /* detached node should exist */);
+			} else {
+				assert(
+					nodes.topLevelLength === length,
+					"Refresher chunk length must match its detached node ID range",
+				);
+				refreshers.set([start.revision, start.localId], nodes);
+			}
+			coveredRoots.set(start, length, true);
+			offset += length;
 		}
 	}
 
