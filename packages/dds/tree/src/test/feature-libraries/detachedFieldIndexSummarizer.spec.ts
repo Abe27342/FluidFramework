@@ -18,7 +18,9 @@ import { FluidClientVersion, FormatValidatorNoOp } from "../../codec/index.js";
 import {
 	DetachedFieldIndex,
 	DetachedFieldIndexFormatVersion,
+	detachedFieldIndexCodecBuilder,
 	makeDetachedFieldIndex,
+	makeDetachedNodeId,
 } from "../../core/index.js";
 // eslint-disable-next-line import-x/no-internal-modules
 import type { FormatV1 } from "../../core/tree/detachedFieldIndexFormatV1.js";
@@ -55,6 +57,44 @@ function createDetachedFieldIndexSummarizer(options?: {
 }
 
 describe("DetachedFieldIndexSummarizer", () => {
+	it("loads an experimental grouped summary with a default reader but cannot downgrade it", async () => {
+		const index = makeDetachedFieldIndex("Grouped");
+		const root = index.createRange(makeDetachedNodeId("root", 0), undefined, 10);
+		index.deleteRange(root, { start: 3, end: 7 });
+		const writer = new DetachedFieldIndexSummarizer(
+			index,
+			testRevisionTagCodec,
+			testIdCompressor,
+			{
+				jsonValidator: FormatValidatorNoOp,
+				minVersionForCollab: FluidClientVersion.v2_0,
+				writeVersionOverrides: new Map([
+					[
+						detachedFieldIndexCodecBuilder.name,
+						DetachedFieldIndexFormatVersion.vRangeExperimental,
+					],
+				]),
+				allowPossiblyIncompatibleWriteVersionOverrides: true,
+			},
+		);
+		const summary = writer.summarize({ stringify: JSON.stringify });
+		const { summarizer: reader, index: loaded } = createDetachedFieldIndexSummarizer();
+		await reader.load(MockStorage.createFromSummary(summary.summary), JSON.parse);
+		assert.deepEqual(loaded.getSummaryData(), index.getSummaryData());
+		assert.deepEqual(loaded.getLocation(makeDetachedNodeId("root", 9)), { root, index: 5 });
+		assert.deepEqual(loaded.getFirst(makeDetachedNodeId("root", 7), 3), {
+			value: { root, index: 3 },
+			length: 3,
+		});
+		assert.throws(
+			() => reader.summarize({ stringify: JSON.stringify }),
+			/Legacy detached field formats cannot encode grouped fields/,
+		);
+		const location = loaded.getLocation(makeDetachedNodeId("root", 7));
+		loaded.deleteRange(location.root, { start: location.index, end: location.index + 2 });
+		assert.deepEqual(loaded.getLocation(makeDetachedNodeId("root", 9)), { root, index: 3 });
+	});
+
 	describe("Summary metadata validation", () => {
 		it("writes metadata blob with version 2", () => {
 			const { summarizer } = createDetachedFieldIndexSummarizer();

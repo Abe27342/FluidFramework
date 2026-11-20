@@ -12,7 +12,11 @@ import {
 	SerializationVersion,
 } from "@fluidframework/id-compressor/internal";
 
-import { FluidClientVersion, type CodecWriteOptions } from "../../../codec/index.js";
+import {
+	FluidClientVersion,
+	FormatValidatorNoOp,
+	type CodecWriteOptions,
+} from "../../../codec/index.js";
 import {
 	DetachedFieldIndex,
 	expandDetachedFieldRanges,
@@ -224,7 +228,10 @@ function generateTestCases(
 		},
 		{
 			name: "Unfinalized id",
-			validFor: new Set([DetachedFieldIndexFormatVersion.v2]),
+			validFor: new Set([
+				DetachedFieldIndexFormatVersion.v2,
+				DetachedFieldIndexFormatVersion.vRangeExperimental,
+			]),
 			data: {
 				maxId,
 				data: new Map([[unfinalizedRevision, new Map([[0, { root: brand(1) }]])]]),
@@ -428,6 +435,299 @@ describe("expandDetachedFieldRanges", () => {
 });
 
 describe("DetachedFieldIndex methods", () => {
+	describe("experimental range persistence", () => {
+		const options: CodecWriteOptions = {
+			...defaultCodecWriteOptions,
+			writeVersionOverrides: new Map([
+				[
+					detachedFieldIndexCodecBuilder.name,
+					DetachedFieldIndexFormatVersion.vRangeExperimental,
+				],
+			]),
+			allowPossiblyIncompatibleWriteVersionOverrides: true,
+		};
+
+		function createFragmentedIndex(): DetachedFieldIndex {
+			const index = makeDetachedFieldIndex("Grouped");
+			const root = index.createRange(makeDetachedNodeId("root", 10), mintRevisionTag(), 8);
+			index.updateLatestRevision(makeDetachedNodeId("root", 12), mintRevisionTag(), 2);
+			index.deleteRange(root, { start: 3, end: 5 });
+			return index;
+		}
+
+		it("requires an explicit compatibility acknowledgment to select experimental writing", () => {
+			const data = makeDetachedFieldIndex().getSummaryData();
+			for (const [minVersionForCollab, version] of [
+				[FluidClientVersion.v2_0, 1],
+				[FluidClientVersion.v2_74, 2],
+			] as const) {
+				const codec = makeDetachedFieldIndexCodec(testIdCompressor, {
+					...defaultCodecWriteOptions,
+					minVersionForCollab,
+				});
+				assert.deepEqual(codec.encode(data), { version, data: [], maxId: -1 });
+			}
+			assert.throws(
+				() =>
+					makeDetachedFieldIndexCodec(testIdCompressor, {
+						...options,
+						allowPossiblyIncompatibleWriteVersionOverrides: false,
+					}),
+				/allowPossiblyIncompatibleWriteVersionOverrides/,
+			);
+			assert.deepEqual(makeDetachedFieldIndexCodec(testIdCompressor, options).encode(data), {
+				version: DetachedFieldIndexFormatVersion.vRangeExperimental,
+				data: [],
+				maxId: -1,
+			});
+		});
+
+		describe("Snapshots", () => {
+			useSnapshotDirectory("detached-field-index/ranges");
+			it("middle deletion and mixed lifetimes", () => {
+				const codec = makeDetachedFieldIndexCodec(testIdCompressor, options);
+				const encoded = codec.encode(createFragmentedIndex().getSummaryData());
+				assert.deepEqual(encoded, {
+					version: DetachedFieldIndexFormatVersion.vRangeExperimental,
+					data: [
+						[
+							"root",
+							[
+								[10, 0, 0, 3],
+								[15, 0, 3, 3],
+							],
+						],
+					],
+					maxId: 0,
+				});
+				takeJsonSnapshot(encoded);
+			});
+		});
+
+		it("loads ranges with a default reader without enabling experimental writing", () => {
+			const original = createFragmentedIndex();
+			const experimental = makeDetachedFieldIndexCodec(testIdCompressor, options);
+			const stable = makeDetachedFieldIndexCodec();
+			const decoded = stable.decode(experimental.encode(original.getSummaryData()));
+			const index = makeDetachedFieldIndex();
+			const beforeLoading = index.createCheckpoint();
+			index.loadData(decoded);
+			assert.deepEqual(index.getSummaryData(), original.getSummaryData());
+			assert.deepEqual(
+				[...index.ranges()],
+				[
+					{ id: makeDetachedNodeId("root", 10), root: 0, index: 0, count: 3 },
+					{ id: makeDetachedNodeId("root", 15), root: 0, index: 3, count: 3 },
+				],
+			);
+			assert.deepEqual(index.getLocation(makeDetachedNodeId("root", 17)), {
+				root: 0,
+				index: 5,
+			});
+			for (const minVersionForCollab of [FluidClientVersion.v2_0, FluidClientVersion.v2_74]) {
+				assert.throws(
+					() =>
+						makeDetachedFieldIndexCodec(testIdCompressor, {
+							...defaultCodecWriteOptions,
+							minVersionForCollab,
+						}).encode(index.getSummaryData()),
+					/Legacy detached field formats cannot encode grouped fields/,
+				);
+			}
+			const clone = index.clone();
+			const restore = index.createCheckpoint();
+			const latestRevision = mintRevisionTag();
+			for (const loaded of [index, clone]) {
+				assert.deepEqual(loaded.getFirst(makeDetachedNodeId("root", 15), 3), {
+					value: { root: 0, index: 3 },
+					length: 3,
+				});
+				loaded.setRevisionsForLoadedData(latestRevision);
+				assert.deepEqual(
+					[...loaded.getRangesLastTouchedByRevision(latestRevision)],
+					[
+						{ id: makeDetachedNodeId("root", 10), count: 3 },
+						{ id: makeDetachedNodeId("root", 15), count: 3 },
+					],
+				);
+				assert.throws(() => loaded.setRevisionsForLoadedData(latestRevision));
+				assert.equal(loaded.createRange(makeDetachedNodeId("root", 30), latestRevision, 2), 1);
+			}
+			const location = clone.getLocation(makeDetachedNodeId("root", 15));
+			clone.deleteRange(location.root, { start: location.index, end: location.index + 2 });
+			assert.deepEqual(clone.getLocation(makeDetachedNodeId("root", 17)), {
+				root: 0,
+				index: 3,
+			});
+			assert.deepEqual(index.getLocation(makeDetachedNodeId("root", 17)), {
+				root: 0,
+				index: 5,
+			});
+			restore();
+			assert.deepEqual(index.getSummaryData(), decoded);
+			index.setRevisionsForLoadedData(latestRevision);
+			beforeLoading();
+			assert.deepEqual([...index.ranges()], []);
+			assert.equal(index.createRange(makeDetachedNodeId("root", 30), undefined, 2), 0);
+			assert.deepEqual(index.getLocation(makeDetachedNodeId("root", 31)), {
+				root: 0,
+				index: 1,
+			});
+		});
+
+		it("persists a million nodes as one record despite lifetime boundaries", () => {
+			const index = makeDetachedFieldIndex("Grouped");
+			index.createRange(makeDetachedNodeId("root", 0), mintRevisionTag(), 1_000_000);
+			index.updateLatestRevision(makeDetachedNodeId("root", 10), mintRevisionTag(), 100);
+			const codec = makeDetachedFieldIndexCodec(testIdCompressor, options);
+			const encoded = codec.encode(index.getSummaryData());
+			assert.deepEqual(encoded, {
+				version: DetachedFieldIndexFormatVersion.vRangeExperimental,
+				data: [["root", [[0, 0, 0, 1_000_000]]]],
+				maxId: 0,
+			});
+			const loaded = makeDetachedFieldIndex();
+			loaded.loadData(codec.decode(encoded));
+			assert.equal([...loaded.ranges()].length, 1);
+			assert.deepEqual(loaded.getLocation(makeDetachedNodeId("root", 999_999)), {
+				root: 0,
+				index: 999_999,
+			});
+			assert.equal(loaded.createRange(makeDetachedNodeId("root", 1_000_000)), 1);
+		});
+
+		it("validates legacy-shaped singleton bounds before writing the experimental format", () => {
+			const data: DetachedFieldSummaryData = {
+				maxId: brand(0),
+				data: new Map([["root", new Map([[0, { root: brand(1) }]])]]),
+			};
+			const stable = makeDetachedFieldIndexCodec();
+			const decoded = stable.decode(stable.encode(data));
+			assert.doesNotThrow(() => makeDetachedFieldIndex().loadData(decoded));
+			for (const jsonValidator of [FormatValidatorBasic, FormatValidatorNoOp]) {
+				const codec = makeDetachedFieldIndexCodec(testIdCompressor, {
+					...options,
+					jsonValidator,
+				});
+				assert.throws(() => codec.encode(decoded), /Invalid detached field range bounds/);
+				const valid = { ...decoded, maxId: brand<ForestRootId>(1) };
+				assert.deepEqual(codec.decode(codec.encode(valid)), valid);
+				assert.throws(
+					() => codec.encode({ data: new Map(), maxId: brand(-2) }),
+					/Invalid detached field range bounds/,
+				);
+			}
+		});
+
+		it("rejects null range metadata even without schema validation", () => {
+			const codec = makeDetachedFieldIndexCodec(testIdCompressor, {
+				...options,
+				jsonValidator: FormatValidatorNoOp,
+			});
+			for (const [index, count] of [
+				[null, 1],
+				[0, null],
+				[null, null],
+			]) {
+				assert.throws(
+					() =>
+						codec.decode({
+							version: DetachedFieldIndexFormatVersion.vRangeExperimental,
+							data: [["root", [[0, 0, index, count]]]],
+							maxId: 0,
+						}),
+					/Invalid detached field range bounds/,
+				);
+			}
+		});
+
+		const malformedRanges: readonly [string, number[][]][] = [
+			[
+				"overlapping detached node IDs",
+				[
+					[0, 0, 0, 3],
+					[2, 1, 0, 2],
+				],
+			],
+			[
+				"duplicate detached node IDs",
+				[
+					[0, 0, 0, 2],
+					[0, 1, 0, 2],
+				],
+			],
+			[
+				"overlapping field intervals",
+				[
+					[0, 0, 0, 3],
+					[5, 0, 2, 2],
+				],
+			],
+			[
+				"duplicate field intervals",
+				[
+					[0, 0, 0, 2],
+					[5, 0, 0, 2],
+				],
+			],
+			[
+				"field gap",
+				[
+					[0, 0, 0, 2],
+					[5, 0, 3, 2],
+				],
+			],
+			["nonzero first node index", [[0, 0, 1, 2]]],
+			["zero count", [[0, 0, 0, 0]]],
+			["negative count", [[0, 0, 0, -1]]],
+			["fractional count", [[0, 0, 0, 1.5]]],
+			["negative node index", [[0, 0, -1, 1]]],
+			["forest field ID beyond maxId", [[0, 2, 0, 1]]],
+			["unsafe detached node ID", [[Number.MAX_SAFE_INTEGER + 1, 0, 0, 1]]],
+			["detached node ID overflow", [[Number.MAX_SAFE_INTEGER, 0, 0, 2]]],
+			["node index overflow", [[0, 0, 1, Number.MAX_SAFE_INTEGER]]],
+		];
+		for (const [name, entries] of malformedRanges) {
+			it(`rejects ${name}`, () => {
+				assert.throws(() =>
+					makeDetachedFieldIndexCodec().decode({
+						version: DetachedFieldIndexFormatVersion.vRangeExperimental,
+						data: [["root", entries]],
+						maxId: 1,
+					}),
+				);
+			});
+		}
+
+		it("rejects repeated majors and fields shared between majors", () => {
+			const major = testIdCompressor.normalizeToOpSpace(mintedTag);
+			for (const secondMajor of ["root", major]) {
+				assert.throws(() =>
+					makeDetachedFieldIndexCodec().decode({
+						version: DetachedFieldIndexFormatVersion.vRangeExperimental,
+						data: [
+							["root", [[0, 0, 0, 2]]],
+							[secondMajor, [[5, 0, 2, 2]]],
+						],
+						maxId: 0,
+					}),
+				);
+			}
+		});
+
+		it("validates before replacing loaded data", () => {
+			const index = createFragmentedIndex();
+			const before = index.getSummaryData();
+			assert.throws(() =>
+				index.loadData({
+					maxId: brand(0),
+					data: new Map([["root", new Map([[0, { root: brand(0), index: 1, count: 2 }]])]]),
+				}),
+			);
+			assert.deepEqual(index.getSummaryData(), before);
+		});
+	});
+
 	describe("enumeration order", () => {
 		function assertOrder(
 			index: DetachedFieldIndex,
@@ -911,29 +1211,31 @@ describe("DetachedFieldIndex methods", () => {
 		});
 
 		for (const format of detachedFieldIndexCodecBuilder.registry) {
-			it(`rejects grouped fields only at legacy codec version ${format.formatVersion}`, () => {
-				const index = makeDetachedFieldIndex();
-				const revision = mintRevisionTag();
-				const id = makeDetachedNodeId(revision, 0);
-				const root = index.createRange(id, revision, 3);
-				const codec = format.codec({
-					...defaultCodecWriteOptions,
-					revisionTagCodec: testRevisionTagCodec,
-					idCompressor: testIdCompressor,
+			if (format.formatVersion !== DetachedFieldIndexFormatVersion.vRangeExperimental) {
+				it(`rejects grouped fields only at legacy codec version ${format.formatVersion}`, () => {
+					const index = makeDetachedFieldIndex();
+					const revision = mintRevisionTag();
+					const id = makeDetachedNodeId(revision, 0);
+					const root = index.createRange(id, revision, 3);
+					const codec = format.codec({
+						...defaultCodecWriteOptions,
+						revisionTagCodec: testRevisionTagCodec,
+						idCompressor: testIdCompressor,
+					});
+					const summary = index.getSummaryData();
+					assert.throws(() => codec.encode(summary));
+					index.updateLatestRevision(makeDetachedNodeId(revision, 1), undefined);
+					assert.throws(() => codec.encode(index.getSummaryData()));
+					index.deleteRange(root, { start: 0, end: 2 });
+					assert.doesNotThrow(() => codec.encode(index.getSummaryData()));
+					assert.deepEqual(index.getLocation(makeDetachedNodeId(revision, 2)), {
+						root,
+						index: 0,
+					});
 				});
-				const summary = index.getSummaryData();
-				assert.throws(() => codec.encode(summary));
-				index.updateLatestRevision(makeDetachedNodeId(revision, 1), undefined);
-				assert.throws(() => codec.encode(index.getSummaryData()));
-				index.deleteRange(root, { start: 0, end: 2 });
-				assert.doesNotThrow(() => codec.encode(index.getSummaryData()));
-				assert.deepEqual(index.getLocation(makeDetachedNodeId(revision, 2)), {
-					root,
-					index: 0,
-				});
-			});
+			}
 
-			it(`round-trips singleton ranges through legacy summary version ${format.formatVersion}`, () => {
+			it(`round-trips singleton ranges through summary version ${format.formatVersion}`, () => {
 				const index = makeDetachedFieldIndex("Grouped");
 				const revision = mintRevisionTag();
 				const id = makeDetachedNodeId(revision, 0);
