@@ -5,7 +5,12 @@
 
 import { assert } from "@fluidframework/core-utils/internal";
 
-import { type NestedMap, setInNestedMap, tryGetFromNestedMap } from "../../util/index.js";
+import {
+	type NestedMap,
+	deleteFromNestedMap,
+	setInNestedMap,
+	tryGetFromNestedMap,
+} from "../../util/index.js";
 import type { RevisionTag } from "../rebase/index.js";
 import type { FieldKey } from "../schema-stored/index.js";
 
@@ -14,7 +19,7 @@ import { mapCursorField, type ITreeCursorSynchronous } from "./cursor.js";
 import type * as Delta from "./delta.js";
 import { areDetachedNodeIdsEqual, offsetDetachId } from "./deltaUtil.js";
 import type { DetachedFieldIndex } from "./detachedFieldIndex.js";
-import type { ForestRootId, Major, Minor } from "./detachedFieldIndexTypes.js";
+import type { Major, Minor } from "./detachedFieldIndexTypes.js";
 import type { NodeIndex, PlaceIndex, Range } from "./pathTree.js";
 
 /**
@@ -61,8 +66,8 @@ export function visitDelta(
 	detachedFieldIndex: DetachedFieldIndex,
 	latestRevision: RevisionTag | undefined,
 ): void {
-	const detachPassRoots: Map<ForestRootId, Delta.FieldMap> = new Map();
-	const attachPassRoots: Map<ForestRootId, Delta.FieldMap> = new Map();
+	const detachPassRoots: RootChanges = new Map();
+	const attachPassRoots: RootChanges = new Map();
 	const rootTransfers: Delta.DetachedNodeRename[] = [];
 	const rootDestructions: Delta.DetachedNodeDestruction[] = [];
 	const replacedMarks: Set<Delta.Mark> = new Set();
@@ -116,13 +121,63 @@ export function visitDelta(
 	fixedPointVisitOfRoots(visitor, attachPassRoots, attachConfig);
 	collectDestroys(delta.destroy, attachConfig);
 	for (const { id, count } of rootDestructions) {
-		for (let i = 0; i < count; i += 1) {
-			const offsetId = offsetDetachId(id, i);
-			const root = detachedFieldIndex.getEntry(offsetId);
-			const field = detachedFieldIndex.toFieldKey(root);
-			visitor.destroy(field, { start: 0, end: 1 });
-			detachedFieldIndex.deleteEntry(offsetId);
+		for (let offset = 0; offset < count; ) {
+			const span = detachedFieldIndex.getFirst(offsetDetachId(id, offset), 1);
+			assert(span.value !== undefined, "Destroyed detached nodes must exist");
+			const { root, index } = span.value;
+			const range = { start: index, end: index + span.length };
+			visitor.destroy(detachedFieldIndex.toFieldKey(root), range);
+			detachedFieldIndex.deleteRange(root, range);
+			offset += span.length;
 		}
+	}
+}
+
+/**
+ * Pending nested edits keyed by detached node ID because forest locations can change before a visit.
+ */
+type RootChanges = NestedMap<Major, Minor, Delta.FieldMap>;
+
+function takeRootChanges(
+	roots: RootChanges,
+	id: Delta.DetachedNodeId,
+): Delta.FieldMap | undefined {
+	const fields = tryGetFromNestedMap(roots, id.major, id.minor);
+	deleteFromNestedMap(roots, id.major, id.minor);
+	return fields;
+}
+
+/**
+ * Finds the first pending edit in a detached node ID range without visiting its unmodified nodes.
+ */
+function firstRootChangeOffset(
+	roots: RootChanges,
+	id: Delta.DetachedNodeId,
+	count: number,
+): number {
+	let offset = count;
+	for (const minor of roots.get(id.major)?.keys() ?? []) {
+		if (minor >= id.minor) {
+			offset = Math.min(offset, minor - id.minor);
+		}
+	}
+	return offset;
+}
+
+function renameRootChanges(
+	roots: RootChanges,
+	oldId: Delta.DetachedNodeId,
+	newId: Delta.DetachedNodeId,
+	count: number,
+): void {
+	const changes = [...(roots.get(oldId.major) ?? [])].filter(
+		([minor]) => minor >= oldId.minor && minor < oldId.minor + count,
+	);
+	for (const [minor] of changes) {
+		deleteFromNestedMap(roots, oldId.major, minor);
+	}
+	for (const [minor, fields] of changes) {
+		setInNestedMap(roots, newId.major, newId.minor + minor - oldId.minor, fields);
 	}
 }
 
@@ -136,17 +191,20 @@ export function visitDelta(
  */
 function fixedPointVisitOfRoots(
 	visitor: DeltaVisitor,
-	roots: Map<ForestRootId, Delta.FieldMap>,
+	roots: RootChanges,
 	config: PassConfig,
 ): void {
 	while (roots.size > 0) {
-		for (const [root, modifications] of roots) {
-			roots.delete(root);
-			const field = config.detachedFieldIndex.toFieldKey(root);
-			visitor.enterField(field);
-			// Note: each visit may lead to `roots` being populated with new entries or having some entries removed.
-			visitNode(0, modifications, visitor, config);
-			visitor.exitField(field);
+		for (const [major, changes] of roots) {
+			for (const [minor, modifications] of changes) {
+				deleteFromNestedMap(roots, major, minor);
+				const { root, index } = config.detachedFieldIndex.getLocation({ major, minor });
+				const field = config.detachedFieldIndex.toFieldKey(root);
+				visitor.enterField(field);
+				// Note: each visit may lead to `roots` being populated with new entries or having some entries removed.
+				visitNode(index, modifications, visitor, config);
+				visitor.exitField(field);
+			}
 		}
 	}
 }
@@ -166,66 +224,67 @@ function fixedPointVisitOfRoots(
  */
 function transferRoots(
 	rootTransfers: readonly Delta.DetachedNodeRename[],
-	mapToUpdate: Map<ForestRootId, unknown>,
+	mapToUpdate: RootChanges,
 	detachedFieldIndex: DetachedFieldIndex,
 	visitor: DeltaVisitor,
 	refreshers: NestedMap<Major, Minor, ITreeCursorSynchronous>,
 	revision?: RevisionTag,
 ): void {
-	type AtomizedNodeRename = Omit<Delta.DetachedNodeRename, "count">;
-	let nextBatch = rootTransfers.flatMap(({ oldId, newId, count }) => {
-		const atomized: AtomizedNodeRename[] = [];
+	let nextBatch = rootTransfers.filter(({ oldId, newId, count }) => {
 		// It's possible for a detached node to be revived transiently such that it ends up back in the same detached field.
 		// Making such a transfer wouldn't just be inefficient, it would lead us to mistakenly think we have moved all content
 		// out of the source detached field, and would lead us to delete the tree index entry for that source detached field.
 		// This would effectively result in the tree index missing an entry for the detached field.
-		// This if statement prevents that from happening.
-		if (!areDetachedNodeIdsEqual(oldId, newId)) {
-			for (let i = 0; i < count; i += 1) {
-				atomized.push({ oldId: offsetDetachId(oldId, i), newId: offsetDetachId(newId, i) });
-			}
-		}
-		return atomized;
+		// This check prevents that from happening.
+		return count > 0 && !areDetachedNodeIdsEqual(oldId, newId);
 	});
 	while (nextBatch.length > 0) {
-		const delayed: AtomizedNodeRename[] = [];
-		const priorSize = nextBatch.length;
-		for (const { oldId, newId } of nextBatch) {
-			let oldRootId = detachedFieldIndex.tryGetEntry(oldId);
-			if (oldRootId === undefined) {
-				const tree = tryGetFromNestedMap(refreshers, oldId.major, oldId.minor);
-				if (tree !== undefined) {
-					buildTrees(oldId, [tree], detachedFieldIndex, revision, visitor);
-					oldRootId = detachedFieldIndex.getEntry(oldId);
+		const delayed: Delta.DetachedNodeRename[] = [];
+		let madeProgress = false;
+		for (const rename of nextBatch) {
+			for (let offset = 0; offset < rename.count; ) {
+				const oldId = offsetDetachId(rename.oldId, offset);
+				const newId = offsetDetachId(rename.newId, offset);
+				const remaining = 1;
+				let source = detachedFieldIndex.getFirst(oldId, remaining);
+				if (source.value === undefined) {
+					const tree = tryGetFromNestedMap(refreshers, oldId.major, oldId.minor);
+					if (tree !== undefined) {
+						buildTrees(oldId, [tree], detachedFieldIndex, revision, visitor);
+						source = detachedFieldIndex.getFirst(oldId, remaining);
+					}
 				}
+				const destination = detachedFieldIndex.getFirst(newId, remaining);
+				let count = Math.min(source.length, destination.length);
+				if (source.value === undefined) {
+					// The source field is not populated.
+					// This can happen when another rename needs to be performed first.
+					for (const minor of refreshers.get(oldId.major)?.keys() ?? []) {
+						if (minor > oldId.minor) {
+							count = Math.min(count, minor - oldId.minor);
+						}
+					}
+					delayed.push({ oldId, newId, count });
+				} else if (destination.value === undefined) {
+					const { root, index } = source.value;
+					const newRoot = detachedFieldIndex.createRange(newId, revision, count);
+					const range = { start: index, end: index + count };
+					const oldField = detachedFieldIndex.toFieldKey(root);
+					visitor.enterField(oldField);
+					visitor.detach(range, detachedFieldIndex.toFieldKey(newRoot), newId, false);
+					visitor.exitField(oldField);
+					detachedFieldIndex.deleteRange(root, range);
+					renameRootChanges(mapToUpdate, oldId, newId, count);
+					madeProgress = true;
+				} else {
+					// The destination field is already occupied.
+					// This can happen when another rename needs to be performed first.
+					delayed.push({ oldId, newId, count });
+				}
+				offset += count;
 			}
-			if (oldRootId === undefined) {
-				// The source field is not populated.
-				// This can happen when another rename needs to be performed first.
-				delayed.push({ oldId, newId });
-				continue;
-			}
-			let newRootId = detachedFieldIndex.tryGetEntry(newId);
-			if (newRootId !== undefined) {
-				// The destination field is already occupied.
-				// This can happen when another rename needs to be performed first.
-				delayed.push({ oldId, newId });
-				continue;
-			}
-			newRootId = detachedFieldIndex.createEntry(newId, revision);
-			const fields = mapToUpdate.get(oldRootId);
-			if (fields !== undefined) {
-				mapToUpdate.delete(oldRootId);
-				mapToUpdate.set(newRootId, fields);
-			}
-			const oldField = detachedFieldIndex.toFieldKey(oldRootId);
-			const newField = detachedFieldIndex.toFieldKey(newRootId);
-			visitor.enterField(oldField);
-			visitor.detach({ start: 0, end: 1 }, newField, newId, false);
-			visitor.exitField(oldField);
-			detachedFieldIndex.deleteEntry(oldId);
 		}
-		assert(delayed.length < priorSize, 0x7cf /* transferRoots should make progress */);
+		assert(madeProgress, 0x7cf /* transferRoots should make progress */);
 		nextBatch = delayed;
 	}
 }
@@ -382,7 +441,7 @@ interface PassConfig {
 	 * Nested changes on roots that need to be visited as part of the detach pass.
 	 * Each entry is removed when its associated changes are visited.
 	 */
-	readonly detachPassRoots: Map<ForestRootId, Delta.FieldMap>;
+	readonly detachPassRoots: RootChanges;
 	/**
 	 * Nested changes on roots that need to be visited as part of the attach pass.
 	 * Each entry is removed when its associated changes are visited.
@@ -392,7 +451,7 @@ interface PassConfig {
 	 * the attach pass. Note that such a visit might lead to more nodes being attached, including nodes were visited as
 	 * roots.
 	 */
-	readonly attachPassRoots: Map<ForestRootId, Delta.FieldMap>;
+	readonly attachPassRoots: RootChanges;
 	/**
 	 * Represents transfers of roots from one detached field to another.
 	 */
@@ -465,14 +524,22 @@ function detachPass(
 			visitNode(index, mark.fields, visitor, config);
 		}
 		if (mark.detach !== undefined) {
-			for (let i = 0; i < mark.count; i += 1) {
-				const id = offsetDetachId(mark.detach, i);
-				const root = config.detachedFieldIndex.createEntry(id, config.latestRevision);
+			for (let offset = 0; offset < mark.count; ) {
+				// Keep field creation singleton until the producing checkout selects a range-capable writer.
+				const count = 1;
+				const id = offsetDetachId(mark.detach, offset);
+				const root = config.detachedFieldIndex.createRange(id, config.latestRevision, count);
 				if (mark.fields !== undefined) {
-					config.attachPassRoots.set(root, mark.fields);
+					setInNestedMap(config.attachPassRoots, id.major, id.minor, mark.fields);
 				}
 				const field = config.detachedFieldIndex.toFieldKey(root);
-				visitor.detach({ start: index, end: index + 1 }, field, id, mark.attach !== undefined);
+				visitor.detach(
+					{ start: index, end: index + count },
+					field,
+					id,
+					mark.attach !== undefined,
+				);
+				offset += count;
 			}
 		}
 		if (mark.detach === undefined && mark.attach === undefined) {
@@ -499,29 +566,40 @@ function tryReplace(
 	) {
 		return false;
 	}
-	for (let offset = 0; offset < mark.count; offset++) {
-		const source = config.detachedFieldIndex.tryGetEntry(offsetDetachId(mark.attach, offset));
+	for (let offset = 0; offset < mark.count; ) {
+		const id = offsetDetachId(mark.attach, offset);
+		const source = config.detachedFieldIndex.getFirst(id, 1);
 		if (
-			source === undefined ||
-			config.detachPassRoots.has(source) ||
-			config.attachPassRoots.has(source)
+			source.value === undefined ||
+			firstRootChangeOffset(config.detachPassRoots, id, source.length) < source.length ||
+			firstRootChangeOffset(config.attachPassRoots, id, source.length) < source.length
 		) {
 			return false;
 		}
+		offset += source.length;
 	}
-	for (let offset = 0; offset < mark.count; offset++) {
+	for (let offset = 0; offset < mark.count; ) {
 		const attachId = offsetDetachId(mark.attach, offset);
 		const detachId = offsetDetachId(mark.detach, offset);
-		const source = config.detachedFieldIndex.getEntry(attachId);
-		const destination = config.detachedFieldIndex.createEntry(detachId, config.latestRevision);
+		const source = config.detachedFieldIndex.getFirst(attachId, 1);
+		assert(source.value !== undefined, "Replacement source must remain available");
+		const count = source.length;
+		const { root, index: sourceIndex } = source.value;
+		const sourceRange = { start: sourceIndex, end: sourceIndex + count };
+		const destination = config.detachedFieldIndex.createRange(
+			detachId,
+			config.latestRevision,
+			count,
+		);
 		visitor.replace(
-			config.detachedFieldIndex.toFieldKey(source),
-			{ start: 0, end: 1 },
-			{ start: index + offset, end: index + offset + 1 },
+			config.detachedFieldIndex.toFieldKey(root),
+			sourceRange,
+			{ start: index + offset, end: index + offset + count },
 			config.detachedFieldIndex.toFieldKey(destination),
 			detachId,
 		);
-		config.detachedFieldIndex.deleteEntry(attachId);
+		config.detachedFieldIndex.deleteRange(root, sourceRange);
+		offset += count;
 	}
 	return true;
 }
@@ -535,9 +613,11 @@ function buildTrees(
 ): void {
 	for (const [i, tree] of trees.entries()) {
 		const offsettedId = offsetDetachId(id, i);
-		let root = detachedFieldIndex.tryGetEntry(offsettedId);
-		assert(root === undefined, 0x929 /* Unable to build tree that already exists */);
-		root = detachedFieldIndex.createEntry(offsettedId, latestRevision);
+		assert(
+			detachedFieldIndex.tryGetLocation(offsettedId) === undefined,
+			0x929 /* Unable to build tree that already exists */,
+		);
+		const root = detachedFieldIndex.createRange(offsettedId, latestRevision);
 		const field = detachedFieldIndex.toFieldKey(root);
 		visitor.create([tree], field);
 	}
@@ -568,17 +648,15 @@ function processGlobal(
 ): void {
 	if (global !== undefined) {
 		for (const { id, fields } of global) {
-			let root = config.detachedFieldIndex.tryGetEntry(id);
-			if (root === undefined) {
+			if (config.detachedFieldIndex.tryGetLocation(id) === undefined) {
 				const tree = tryGetFromNestedMap(config.refreshers, id.major, id.minor);
 				assert(tree !== undefined, 0x928 /* refresher data not found */);
 				buildTrees(id, [tree], config.detachedFieldIndex, config.latestRevision, visitor);
-				root = config.detachedFieldIndex.getEntry(id);
 			}
 			// the revision is updated for any refresher data included in the delta that is used
 			config.detachedFieldIndex.updateLatestRevision(id, config.latestRevision);
-			config.detachPassRoots.set(root, fields);
-			config.attachPassRoots.set(root, fields);
+			setInNestedMap(config.detachPassRoots, id.major, id.minor, fields);
+			setInNestedMap(config.attachPassRoots, id.major, id.minor, fields);
 		}
 	}
 }
@@ -617,10 +695,10 @@ function attachPass(
 			continue;
 		}
 		if (mark.attach !== undefined) {
-			for (let i = 0; i < mark.count; i += 1) {
-				const offsetAttachId = offsetDetachId(mark.attach, i);
-				let sourceRoot = config.detachedFieldIndex.tryGetEntry(offsetAttachId);
-				if (sourceRoot === undefined) {
+			for (let offset = 0; offset < mark.count; ) {
+				const offsetAttachId = offsetDetachId(mark.attach, offset);
+				let source = config.detachedFieldIndex.getFirst(offsetAttachId, 1);
+				if (source.value === undefined) {
 					const tree = tryGetFromNestedMap(
 						config.refreshers,
 						offsetAttachId.major,
@@ -634,17 +712,26 @@ function attachPass(
 						config.latestRevision,
 						visitor,
 					);
-					sourceRoot = config.detachedFieldIndex.getEntry(offsetAttachId);
+					source = config.detachedFieldIndex.getFirst(offsetAttachId, 1);
 				}
-				const sourceField = config.detachedFieldIndex.toFieldKey(sourceRoot);
-				const offsetIndex = index + i;
-				visitor.attach(sourceField, { start: 0, end: 1 }, offsetIndex);
-				config.detachedFieldIndex.deleteEntry(offsetAttachId);
-				const fields = config.attachPassRoots.get(sourceRoot);
+				assert(source.value !== undefined, "Attached detached nodes must exist");
+				const { root, index: sourceIndex } = source.value;
+				const pendingOffset = firstRootChangeOffset(
+					config.attachPassRoots,
+					offsetAttachId,
+					source.length,
+				);
+				const count = pendingOffset === 0 ? 1 : pendingOffset;
+				const sourceField = config.detachedFieldIndex.toFieldKey(root);
+				const offsetIndex = index + offset;
+				const range = { start: sourceIndex, end: sourceIndex + count };
+				visitor.attach(sourceField, range, offsetIndex);
+				config.detachedFieldIndex.deleteRange(root, range);
+				const fields = takeRootChanges(config.attachPassRoots, offsetAttachId);
 				if (fields !== undefined) {
-					config.attachPassRoots.delete(sourceRoot);
 					visitNode(offsetIndex, fields, visitor, config);
 				}
+				offset += count;
 			}
 		}
 		if (mark.detach === undefined && mark.fields !== undefined) {

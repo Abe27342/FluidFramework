@@ -15,9 +15,11 @@ import {
 import { FluidClientVersion, type CodecWriteOptions } from "../../../codec/index.js";
 import {
 	DetachedFieldIndex,
+	expandDetachedFieldRanges,
 	type ForestRootId,
 	makeDetachedFieldIndex,
 	makeDetachedNodeId,
+	type RevisionTag,
 	RevisionTagCodec,
 } from "../../../core/index.js";
 import {
@@ -348,48 +350,673 @@ describe("DetachedFieldIndex Codecs", () => {
 	});
 });
 
+describe("expandDetachedFieldRanges", () => {
+	it("projects empty and singleton fields without adding undefined revisions", () => {
+		const index = makeDetachedFieldIndex();
+		assert.deepEqual([...expandDetachedFieldRanges(index.ranges())], []);
+		const revision = mintRevisionTag();
+		const first = makeDetachedNodeId(undefined, 0);
+		const second = makeDetachedNodeId(revision, 1);
+		const firstRoot = index.createRange(first, undefined);
+		const secondRoot = index.createRange(second, revision);
+		assert.deepEqual(
+			[...expandDetachedFieldRanges(index.ranges())],
+			[
+				{ id: first, root: firstRoot, index: 0 },
+				{ id: second, root: secondRoot, index: 0, latestRelevantRevision: revision },
+			],
+		);
+	});
+
+	it("preserves IDs, offsets, and lifetimes when expanding fragmented grouped fields", () => {
+		const index = makeDetachedFieldIndex();
+		const revision = mintRevisionTag();
+		const laterRevision = mintRevisionTag();
+		const root = index.createRange(makeDetachedNodeId(revision, 10), revision, 5);
+		index.updateLatestRevision(makeDetachedNodeId(revision, 12), laterRevision);
+		index.deleteRange(root, { start: 1, end: 2 });
+		const otherRoot = index.createRange(makeDetachedNodeId(undefined, 20), undefined, 2);
+		const ranges = [...index.ranges()];
+		assert.deepEqual(
+			[...expandDetachedFieldRanges(ranges)],
+			[
+				{
+					id: makeDetachedNodeId(revision, 10),
+					root,
+					index: 0,
+					latestRelevantRevision: revision,
+				},
+				{
+					id: makeDetachedNodeId(revision, 12),
+					root,
+					index: 1,
+					latestRelevantRevision: laterRevision,
+				},
+				{
+					id: makeDetachedNodeId(revision, 13),
+					root,
+					index: 2,
+					latestRelevantRevision: revision,
+				},
+				{
+					id: makeDetachedNodeId(revision, 14),
+					root,
+					index: 3,
+					latestRelevantRevision: revision,
+				},
+				{ id: makeDetachedNodeId(undefined, 20), root: otherRoot, index: 0 },
+				{ id: makeDetachedNodeId(undefined, 21), root: otherRoot, index: 1 },
+			],
+		);
+		assert.deepEqual([...index.ranges()], ranges);
+	});
+
+	it("allows scalar mutation consumers to retain IDs and resolve shifted locations again", () => {
+		const index = makeDetachedFieldIndex();
+		index.createRange(makeDetachedNodeId(undefined, 10), undefined, 4);
+		const ids = [...expandDetachedFieldRanges(index.ranges())].map(({ id }) => id);
+		for (const id of ids) {
+			const location = index.getLocation(id);
+			assert.equal(location.index, 0);
+			index.deleteRange(location.root, {
+				start: location.index,
+				end: location.index + 1,
+			});
+		}
+		assert.deepEqual([...index.ranges()], []);
+	});
+});
+
 describe("DetachedFieldIndex methods", () => {
-	describe("createEntry", () => {
-		it("can retrieve entries after creating", () => {
-			const detachedIndex = makeDetachedFieldIndex();
-			const revisionTag1 = mintRevisionTag();
-			const detachedNodeId1 = makeDetachedNodeId(revisionTag1, 1);
+	describe("enumeration order", () => {
+		function assertOrder(
+			index: DetachedFieldIndex,
+			expected: readonly (readonly [
+				major: RevisionTag | undefined,
+				minors: readonly number[],
+			])[],
+		): void {
+			assert.deepEqual(
+				[...index.getSummaryData().data].map(([major, entries]) => [
+					major,
+					[...entries.keys()],
+				]),
+				expected,
+			);
+			assert.deepEqual(
+				[...expandDetachedFieldRanges(index.ranges())].map((entry) => entry.id),
+				expected.flatMap(([major, minors]) =>
+					minors.map((minor) => makeDetachedNodeId(major, minor)),
+				),
+			);
+		}
 
-			const revisionTag2 = mintRevisionTag();
-			const rootId = detachedIndex.createEntry(detachedNodeId1, revisionTag2);
+		it("retains a major's position until its last field is removed", () => {
+			const index = makeDetachedFieldIndex();
+			const majorA = mintRevisionTag();
+			const majorB = mintRevisionTag();
+			const a0 = makeDetachedNodeId(majorA, 0);
+			const a1 = makeDetachedNodeId(majorA, 1);
+			const a2 = makeDetachedNodeId(majorA, 2);
+			index.createRange(a0, undefined);
+			index.createRange(makeDetachedNodeId(majorB, 0), undefined);
+			index.createRange(a2, undefined);
+			index.createRange(a1, undefined);
+			index.deleteRange(index.getLocation(a0).root, { start: 0, end: 1 });
+			assertOrder(index, [
+				[majorA, [2, 1]],
+				[majorB, [0]],
+			]);
 
-			const revisionTag3 = mintRevisionTag();
-			const detachedNodeId2 = makeDetachedNodeId(revisionTag3, 2);
-			assert.equal(detachedIndex.tryGetEntry(detachedNodeId1), rootId);
-			assert.equal(detachedIndex.getEntry(detachedNodeId1), rootId);
-			assert.equal(detachedIndex.tryGetEntry(detachedNodeId2), undefined);
-			assert.throws(() => detachedIndex.getEntry(detachedNodeId2));
+			index.updateLatestRevision(a2, majorB);
+			index.updateLatestRevision(a1, majorB);
+			assertOrder(index, [
+				[majorA, [2, 1]],
+				[majorB, [0]],
+			]);
+
+			index.deleteRange(index.getLocation(a2).root, { start: 0, end: 1 });
+			index.createRange(a2, undefined);
+			assertOrder(index, [
+				[majorA, [1, 2]],
+				[majorB, [0]],
+			]);
+			index.deleteRange(index.getLocation(a1).root, { start: 0, end: 1 });
+			index.deleteRange(index.getLocation(a2).root, { start: 0, end: 1 });
+			index.createRange(a0, undefined);
+			assertOrder(index, [
+				[majorB, [0]],
+				[majorA, [0]],
+			]);
 		});
 
-		it("creates multiple rootIds and minorIds when count > 1 is passed in", () => {
-			const detachedIndex = makeDetachedFieldIndex();
-			const revisionTag1 = mintRevisionTag();
-			const detachedNodeId1 = makeDetachedNodeId(revisionTag1, 1);
+		it("preserves major and minor order through clone, checkpoint, and load", () => {
+			const index = makeDetachedFieldIndex();
+			const major = mintRevisionTag();
+			const a0 = makeDetachedNodeId(major, 0);
+			const a1 = makeDetachedNodeId(major, 1);
+			const a3 = makeDetachedNodeId(major, 3);
+			index.createRange(a0, undefined);
+			index.createRange(makeDetachedNodeId(undefined, 4), undefined);
+			index.createRange(a3, undefined);
+			index.createRange(a1, undefined);
+			index.deleteRange(index.getLocation(a0).root, { start: 0, end: 1 });
+			const expected = [
+				[major, [3, 1]],
+				[undefined, [4]],
+			] as const;
+			const clone = index.clone();
+			assertOrder(clone, expected);
+			clone.deleteRange(clone.getLocation(a3).root, { start: 0, end: 1 });
+			clone.createRange(a3, undefined);
+			assertOrder(clone, [
+				[major, [1, 3]],
+				[undefined, [4]],
+			]);
+			assertOrder(index, expected);
 
-			const revisionTag2 = mintRevisionTag();
-			detachedIndex.createEntry(detachedNodeId1, revisionTag2, 2);
+			const restore = index.createCheckpoint();
+			for (let attempt = 0; attempt < 2; attempt++) {
+				index.deleteRange(index.getLocation(a3).root, { start: 0, end: 1 });
+				index.deleteRange(index.getLocation(a1).root, { start: 0, end: 1 });
+				index.createRange(a0, undefined);
+				assertOrder(index, [
+					[undefined, [4]],
+					[major, [0]],
+				]);
+				restore();
+				assertOrder(index, expected);
+			}
 
-			const rootIds = [...detachedIndex.getRootsLastTouchedByRevision(revisionTag2)];
-			assert.equal(rootIds.length, 2);
+			const loaded = makeDetachedFieldIndex();
+			loaded.createRange(makeDetachedNodeId(mintRevisionTag(), 0), undefined);
+			loaded.loadData(index.getSummaryData());
+			assertOrder(loaded, expected);
+			loaded.setRevisionsForLoadedData(mintRevisionTag());
+			assertOrder(loaded, expected);
+		});
 
-			const entries = [...detachedIndex.entries()];
-			assert.deepEqual(entries, [
-				{ root: rootIds[0], latestRelevantRevision: revisionTag2, id: detachedNodeId1 },
-				{
-					root: rootIds[1],
-					latestRelevantRevision: revisionTag2,
-					id: { major: detachedNodeId1.major, minor: detachedNodeId1.minor + 1 },
-				},
+		it("preserves order for compact grouped fields through fragmentation and consumption", () => {
+			const index = makeDetachedFieldIndex("Grouped");
+			const majorA = mintRevisionTag();
+			const majorB = mintRevisionTag();
+			const first = index.createRange(makeDetachedNodeId(majorA, 0), undefined, 2);
+			const other = index.createRange(makeDetachedNodeId(majorB, 0), undefined, 1);
+			const grouped = index.createRange(makeDetachedNodeId(majorA, 10), undefined, 1_000_000);
+			index.deleteRange(first, { start: 0, end: 2 });
+			assert.deepEqual(
+				[...index.ranges()].map((record) => record.root),
+				[grouped, other],
+			);
+			index.updateLatestRevision(makeDetachedNodeId(majorA, 110), majorB, 200);
+			assert.deepEqual(
+				[...index.clone().ranges()].map((record) => record.root),
+				[grouped, grouped, grouped, other],
+			);
+			index.deleteRange(grouped, { start: 0, end: 999_999 });
+			assertOrder(index, [
+				[majorA, [1_000_009]],
+				[majorB, [0]],
+			]);
+			index.purge();
+			index.createRange(makeDetachedNodeId(majorB, 0), undefined, 1);
+			index.createRange(makeDetachedNodeId(majorA, 0), undefined, 1);
+			assertOrder(index, [
+				[majorB, [0]],
+				[majorA, [0]],
 			]);
 		});
 	});
 
-	it("entries returns all created entries", () => {
+	describe("range operations", () => {
+		it("supports grouped fields without a constructor mode", () => {
+			for (const index of [
+				makeDetachedFieldIndex(),
+				new DetachedFieldIndex("Grouped", idAllocatorFromMaxId() as IdAllocator<ForestRootId>),
+			]) {
+				const id = makeDetachedNodeId(undefined, 0);
+				const root = index.createRange(id, undefined, 3);
+				assert.deepEqual(index.getFirst(id, 3), {
+					value: { root, index: 0 },
+					length: 3,
+				});
+				assert.deepEqual(index.clone().getLocation(makeDetachedNodeId(undefined, 2)), {
+					root,
+					index: 2,
+				});
+				assert.equal(index.createRange(makeDetachedNodeId(undefined, 3), undefined), root + 1);
+			}
+		});
+
+		it("represents a million nodes as one record and allocates only one field", () => {
+			const index = makeDetachedFieldIndex("Grouped");
+			const revision = mintRevisionTag();
+			const id = makeDetachedNodeId(revision, 10);
+			const count = 1_000_000;
+			const root = index.createRange(id, revision, count);
+			assert.deepEqual(
+				[...index.ranges()],
+				[{ id, count, root, index: 0, latestRelevantRevision: revision }],
+			);
+			for (const offset of [0, 123_456, count - 1]) {
+				const queryId = makeDetachedNodeId(revision, id.minor + offset);
+				assert.deepEqual(index.getLocation(queryId), { root, index: offset });
+				assert.deepEqual(index.getFirst(queryId, count), {
+					value: { root, index: offset },
+					length: count - offset,
+				});
+			}
+			assert.equal(index.tryGetLocation(makeDetachedNodeId(revision, 9)), undefined);
+			assert.equal(
+				index.tryGetLocation(makeDetachedNodeId(revision, id.minor + count)),
+				undefined,
+			);
+			assert.deepEqual(index.getFieldRanges(root, { start: 0, end: count }), [{ id, count }]);
+			assert.deepEqual([...index.getRangesLastTouchedByRevision(revision)], [{ id, count }]);
+			assert.equal(
+				index.createRange(makeDetachedNodeId(revision, id.minor + count), revision),
+				root + 1,
+			);
+		});
+
+		it("finds missing prefixes in detached node ID order without crossing major or forest field boundaries", () => {
+			const index = makeDetachedFieldIndex("Grouped");
+			const major = mintRevisionTag();
+			const otherMajor = mintRevisionTag();
+			index.createRange(makeDetachedNodeId(major, 100), undefined, 5);
+			const root = index.createRange(makeDetachedNodeId(major, 10), undefined, 3);
+			index.createRange(makeDetachedNodeId(otherMajor, 0), undefined, 500);
+			index.createRange(makeDetachedNodeId(undefined, 5), undefined, 5);
+			for (const count of [
+				0,
+				-1,
+				0.5,
+				Number.POSITIVE_INFINITY,
+				Number.NaN,
+				Number.MAX_SAFE_INTEGER + 1,
+			]) {
+				for (const minor of [0, 10]) {
+					assert.throws(() => index.getFirst(makeDetachedNodeId(major, minor), count));
+				}
+			}
+			assert.deepEqual(index.getFirst(makeDetachedNodeId(major, 0), 200), {
+				value: undefined,
+				length: 10,
+			});
+			assert.deepEqual(index.getFirst(makeDetachedNodeId(major, 13), 200), {
+				value: undefined,
+				length: 87,
+			});
+			assert.deepEqual(index.getFirst(makeDetachedNodeId(major, 13), 2), {
+				value: undefined,
+				length: 2,
+			});
+			assert.deepEqual(index.getFirst(makeDetachedNodeId(major, 105), 1_000_000), {
+				value: undefined,
+				length: 1_000_000,
+			});
+			assert.deepEqual(index.getFirst(makeDetachedNodeId(mintRevisionTag(), 0), 200), {
+				value: undefined,
+				length: 200,
+			});
+			assert.deepEqual(index.getFirst(makeDetachedNodeId(undefined, 0), 200), {
+				value: undefined,
+				length: 5,
+			});
+			index.createRange(makeDetachedNodeId(major, 13), undefined, 2);
+			assert.deepEqual(index.getFirst(makeDetachedNodeId(major, 10), 5), {
+				value: { root, index: 0 },
+				length: 3,
+			});
+		});
+
+		it("splits lifetimes without extending retention or splitting contiguous forest locations", () => {
+			const index = makeDetachedFieldIndex("Grouped");
+			const oldRevision = mintRevisionTag();
+			const newRevision = mintRevisionTag();
+			const id = makeDetachedNodeId(undefined, 0);
+			const root = index.createRange(id, oldRevision, 100);
+			index.updateLatestRevision(makeDetachedNodeId(undefined, 20), newRevision, 30);
+			assert.deepEqual(
+				[...index.ranges()].map((record) => [
+					record.id.minor,
+					record.count,
+					record.index,
+					record.latestRelevantRevision,
+				]),
+				[
+					[0, 20, 0, oldRevision],
+					[20, 30, 20, newRevision],
+					[50, 50, 50, oldRevision],
+				],
+			);
+			assert.deepEqual(
+				[...index.getRangesLastTouchedByRevision(oldRevision)],
+				[
+					{ id, count: 20 },
+					{ id: makeDetachedNodeId(undefined, 50), count: 50 },
+				],
+			);
+			assert.deepEqual(
+				[...index.getRangesLastTouchedByRevision(newRevision)],
+				[{ id: makeDetachedNodeId(undefined, 20), count: 30 }],
+			);
+			assert.deepEqual(index.getFirst(makeDetachedNodeId(undefined, 10), 80), {
+				value: { root, index: 10 },
+				length: 80,
+			});
+			assert.deepEqual(index.getFieldRanges(root, { start: 10, end: 90 }), [
+				{ id: makeDetachedNodeId(undefined, 10), count: 80 },
+			]);
+			index.updateLatestRevision(makeDetachedNodeId(undefined, 25), undefined);
+			assert.equal([...index.ranges()].length, 5);
+			assert.deepEqual(index.getFirst(id, 100), { value: { root, index: 0 }, length: 100 });
+			index.updateLatestRevision(id, oldRevision, 100);
+			assert.equal([...index.ranges()].length, 1);
+			assert.deepEqual([...index.getRangesLastTouchedByRevision(newRevision)], []);
+		});
+
+		it("updates a detached node ID range that spans several forest fields", () => {
+			const index = makeDetachedFieldIndex("Grouped");
+			const oldRevision = mintRevisionTag();
+			const newRevision = mintRevisionTag();
+			const first = index.createRange(makeDetachedNodeId(undefined, 0), oldRevision, 5);
+			const second = index.createRange(makeDetachedNodeId(undefined, 5), oldRevision, 5);
+			index.updateLatestRevision(makeDetachedNodeId(undefined, 3), newRevision, 4);
+			assert.deepEqual(
+				[...index.getRangesLastTouchedByRevision(newRevision)],
+				[
+					{ id: makeDetachedNodeId(undefined, 3), count: 2 },
+					{ id: makeDetachedNodeId(undefined, 5), count: 2 },
+				],
+			);
+			assert.deepEqual(index.getLocation(makeDetachedNodeId(undefined, 3)), {
+				root: first,
+				index: 3,
+			});
+			assert.deepEqual(index.getLocation(makeDetachedNodeId(undefined, 6)), {
+				root: second,
+				index: 1,
+			});
+			assert.equal([...index.ranges()].length, 4);
+		});
+
+		it("removes forest field ranges across detached node ID runs and shifts surviving suffixes", () => {
+			const index = makeDetachedFieldIndex("Grouped");
+			const revision = mintRevisionTag();
+			const laterRevision = mintRevisionTag();
+			const root = index.createRange(makeDetachedNodeId(undefined, 0), revision, 100);
+			index.deleteRange(root, { start: 20, end: 40 });
+			assert.equal([...index.ranges()].length, 2);
+			assert.deepEqual(index.getFieldRanges(root, { start: 10, end: 30 }), [
+				{ id: makeDetachedNodeId(undefined, 10), count: 10 },
+				{ id: makeDetachedNodeId(undefined, 40), count: 10 },
+			]);
+			assert.deepEqual(index.getLocation(makeDetachedNodeId(undefined, 40)), {
+				root,
+				index: 20,
+			});
+			assert.deepEqual(index.getLocation(makeDetachedNodeId(undefined, 99)), {
+				root,
+				index: 79,
+			});
+			assert.deepEqual(index.getFirst(makeDetachedNodeId(undefined, 20), 80), {
+				value: undefined,
+				length: 20,
+			});
+			assert.deepEqual(index.getFirst(makeDetachedNodeId(undefined, 0), 100), {
+				value: { root, index: 0 },
+				length: 20,
+			});
+			index.updateLatestRevision(makeDetachedNodeId(undefined, 50), laterRevision, 10);
+			index.deleteRange(root, { start: 15, end: 45 });
+			assert.deepEqual(index.getFieldRanges(root, { start: 0, end: 50 }), [
+				{ id: makeDetachedNodeId(undefined, 0), count: 15 },
+				{ id: makeDetachedNodeId(undefined, 65), count: 35 },
+			]);
+			assert.deepEqual([...index.getRangesLastTouchedByRevision(laterRevision)], []);
+			assert.equal(index.tryGetLocation(makeDetachedNodeId(undefined, 64)), undefined);
+			index.deleteRange(root, { start: 0, end: 50 });
+			assert.deepEqual([...index.ranges()], []);
+			assert.deepEqual([...index.getRangesLastTouchedByRevision(revision)], []);
+			assert.throws(() => index.getFieldRanges(root, { start: 0, end: 0 }));
+		});
+
+		it("snapshots detached node ID ranges by revision while earlier ranges in the same field are consumed", () => {
+			const index = makeDetachedFieldIndex("Grouped");
+			const oldRevision = mintRevisionTag();
+			const newRevision = mintRevisionTag();
+			const root = index.createRange(makeDetachedNodeId(undefined, 0), oldRevision, 100);
+			index.updateLatestRevision(makeDetachedNodeId(undefined, 20), newRevision, 20);
+			index.updateLatestRevision(makeDetachedNodeId(undefined, 60), newRevision, 20);
+			const snapshot = index.getRangesLastTouchedByRevision(oldRevision);
+			for (const { id, count } of snapshot) {
+				const location = index.getLocation(id);
+				index.deleteRange(location.root, {
+					start: location.index,
+					end: location.index + count,
+				});
+			}
+			assert.deepEqual(
+				[...snapshot],
+				[
+					{ id: makeDetachedNodeId(undefined, 0), count: 20 },
+					{ id: makeDetachedNodeId(undefined, 40), count: 20 },
+					{ id: makeDetachedNodeId(undefined, 80), count: 20 },
+				],
+			);
+			assert.deepEqual(index.getFieldRanges(root, { start: 0, end: 40 }), [
+				{ id: makeDetachedNodeId(undefined, 20), count: 20 },
+				{ id: makeDetachedNodeId(undefined, 60), count: 20 },
+			]);
+			assert.deepEqual([...index.getRangesLastTouchedByRevision(oldRevision)], []);
+			assert.equal([...index.ranges()].length, 2);
+		});
+
+		it("clones and repeatedly restores compact independent state and allocation", () => {
+			const index = makeDetachedFieldIndex("Grouped");
+			const revision = mintRevisionTag();
+			const laterRevision = mintRevisionTag();
+			const id = makeDetachedNodeId(undefined, 0);
+			const root = index.createRange(id, revision, 1_000_000);
+			const restore = index.createCheckpoint();
+			const clone = index.clone();
+			clone.updateLatestRevision(makeDetachedNodeId(undefined, 100), laterRevision, 10);
+			clone.deleteRange(root, { start: 200, end: 300 });
+			assert.equal([...clone.ranges()].length, 4);
+			assert.equal([...index.ranges()].length, 1);
+			assert.deepEqual([...index.getRangesLastTouchedByRevision(laterRevision)], []);
+			for (let attempt = 0; attempt < 2; attempt++) {
+				index.deleteRange(root, { start: 0, end: 1_000_000 });
+				index.createRange(makeDetachedNodeId(undefined, 2_000_000), undefined);
+				restore();
+				assert.deepEqual(
+					[...index.ranges()],
+					[{ id, root, index: 0, count: 1_000_000, latestRelevantRevision: revision }],
+				);
+				assert.equal(
+					index.createRange(makeDetachedNodeId(undefined, 1_000_000), undefined),
+					root + 1,
+				);
+			}
+			assert.equal([...clone.ranges()].length, 4);
+		});
+
+		it("rejects overlaps, holes, and invalid forest field ranges without changing the index", () => {
+			const index = makeDetachedFieldIndex("Grouped");
+			const revision = mintRevisionTag();
+			const id = makeDetachedNodeId(undefined, 10);
+			const root = index.createRange(id, revision, 10);
+			const original = [...index.ranges()];
+			for (const [minor, count] of [
+				[10, 10],
+				[0, 11],
+				[15, 20],
+			]) {
+				const overlap = makeDetachedNodeId(undefined, minor);
+				assert.throws(() => index.createRange(overlap, revision, count));
+			}
+			for (const count of [0, -1, 0.5]) {
+				assert.throws(() => index.createRange(id, revision, count));
+			}
+			assert.throws(() => index.updateLatestRevision(id, mintRevisionTag(), 11));
+			assert.throws(() =>
+				index.updateLatestRevision(makeDetachedNodeId(undefined, 9), mintRevisionTag(), 5),
+			);
+			for (const range of [
+				{ start: -1, end: 1 },
+				{ start: 0, end: 11 },
+				{ start: 5, end: 4 },
+				{ start: 0.5, end: 1 },
+			]) {
+				assert.throws(() => index.getFieldRanges(root, range));
+				assert.throws(() => index.deleteRange(root, range));
+			}
+			assert.throws(() => index.getLocation(makeDetachedNodeId(undefined, 0)));
+			assert.throws(() => index.getFieldRanges(brand(root + 1), { start: 0, end: 1 }));
+			assert.deepEqual(index.getFieldRanges(root, { start: 10, end: 10 }), []);
+			index.deleteRange(root, { start: 10, end: 10 });
+			assert.deepEqual([...index.ranges()], original);
+			assert.equal(index.createRange(makeDetachedNodeId(undefined, 20), undefined), root + 1);
+
+			index.deleteRange(root, { start: 3, end: 7 });
+			const fragmented = [...index.ranges()];
+			assert.throws(() => index.updateLatestRevision(id, mintRevisionTag(), 10));
+			assert.deepEqual([...index.ranges()], fragmented);
+		});
+
+		it("loads grouped summary data with independent locations and initializes lifetimes", () => {
+			const index = makeDetachedFieldIndex("Grouped");
+			const revision = mintRevisionTag();
+			const id = makeDetachedNodeId(undefined, 0);
+			const root = index.createRange(id, revision, 3);
+			index.updateLatestRevision(makeDetachedNodeId(undefined, 1), undefined);
+			const loaded = makeDetachedFieldIndex("Loaded");
+			loaded.loadData(index.getSummaryData());
+			assert.deepEqual([...loaded.ranges()], [{ id, root, index: 0, count: 3 }]);
+			assert.deepEqual(loaded.getLocation(makeDetachedNodeId(undefined, 2)), {
+				root,
+				index: 2,
+			});
+			loaded.setRevisionsForLoadedData(revision);
+			assert.deepEqual(
+				[...loaded.getRangesLastTouchedByRevision(revision)],
+				[{ id, count: 3 }],
+			);
+			loaded.deleteRange(root, { start: 0, end: 2 });
+			assert.deepEqual(index.getLocation(makeDetachedNodeId(undefined, 2)), {
+				root,
+				index: 2,
+			});
+		});
+
+		for (const format of detachedFieldIndexCodecBuilder.registry) {
+			it(`rejects grouped fields only at legacy codec version ${format.formatVersion}`, () => {
+				const index = makeDetachedFieldIndex();
+				const revision = mintRevisionTag();
+				const id = makeDetachedNodeId(revision, 0);
+				const root = index.createRange(id, revision, 3);
+				const codec = format.codec({
+					...defaultCodecWriteOptions,
+					revisionTagCodec: testRevisionTagCodec,
+					idCompressor: testIdCompressor,
+				});
+				const summary = index.getSummaryData();
+				assert.throws(() => codec.encode(summary));
+				index.updateLatestRevision(makeDetachedNodeId(revision, 1), undefined);
+				assert.throws(() => codec.encode(index.getSummaryData()));
+				index.deleteRange(root, { start: 0, end: 2 });
+				assert.doesNotThrow(() => codec.encode(index.getSummaryData()));
+				assert.deepEqual(index.getLocation(makeDetachedNodeId(revision, 2)), {
+					root,
+					index: 0,
+				});
+			});
+
+			it(`round-trips singleton ranges through legacy summary version ${format.formatVersion}`, () => {
+				const index = makeDetachedFieldIndex("Grouped");
+				const revision = mintRevisionTag();
+				const id = makeDetachedNodeId(revision, 0);
+				const root = index.createRange(id, revision, 1);
+				const codec = format.codec({
+					...defaultCodecWriteOptions,
+					revisionTagCodec: testRevisionTagCodec,
+					idCompressor: testIdCompressor,
+				});
+				const loaded = makeDetachedFieldIndex("Loaded");
+				loaded.loadData(codec.decode(codec.encode(index.getSummaryData())));
+				assert.deepEqual([...loaded.ranges()], [{ id, count: 1, root, index: 0 }]);
+				const restore = loaded.createCheckpoint();
+				const clone = loaded.clone();
+				const latestRevision = mintRevisionTag();
+				clone.setRevisionsForLoadedData(latestRevision);
+				loaded.setRevisionsForLoadedData(latestRevision);
+				assert.throws(() => loaded.setRevisionsForLoadedData(latestRevision));
+				restore();
+				loaded.setRevisionsForLoadedData(latestRevision);
+				assert.deepEqual(
+					[...loaded.getRangesLastTouchedByRevision(latestRevision)],
+					[{ id, count: 1 }],
+				);
+				assert.equal(loaded.createRange(makeDetachedNodeId(revision, 1), undefined), root + 1);
+			});
+		}
+	});
+
+	describe("createRange", () => {
+		it("can retrieve locations after creating", () => {
+			const detachedIndex = makeDetachedFieldIndex();
+			const revisionTag1 = mintRevisionTag();
+			const detachedNodeId1 = makeDetachedNodeId(revisionTag1, 1);
+
+			const revisionTag2 = mintRevisionTag();
+			const rootId = detachedIndex.createRange(detachedNodeId1, revisionTag2);
+
+			const revisionTag3 = mintRevisionTag();
+			const detachedNodeId2 = makeDetachedNodeId(revisionTag3, 2);
+			assert.deepEqual(detachedIndex.tryGetLocation(detachedNodeId1), {
+				root: rootId,
+				index: 0,
+			});
+			assert.deepEqual(detachedIndex.getLocation(detachedNodeId1), {
+				root: rootId,
+				index: 0,
+			});
+			assert.equal(detachedIndex.tryGetLocation(detachedNodeId2), undefined);
+			assert.throws(() => detachedIndex.getLocation(detachedNodeId2));
+		});
+
+		it("creates consecutive minor IDs in one field when count > 1 is passed in", () => {
+			const detachedIndex = makeDetachedFieldIndex();
+			const revisionTag1 = mintRevisionTag();
+			const detachedNodeId1 = makeDetachedNodeId(revisionTag1, 1);
+
+			const revisionTag2 = mintRevisionTag();
+			const root = detachedIndex.createRange(detachedNodeId1, revisionTag2, 2);
+			assert.deepEqual(
+				[...detachedIndex.getRangesLastTouchedByRevision(revisionTag2)],
+				[{ id: detachedNodeId1, count: 2 }],
+			);
+			assert.deepEqual(
+				[...detachedIndex.ranges()],
+				[
+					{
+						root,
+						index: 0,
+						count: 2,
+						latestRelevantRevision: revisionTag2,
+						id: detachedNodeId1,
+					},
+				],
+			);
+			assert.deepEqual(
+				detachedIndex.getLocation(makeDetachedNodeId(revisionTag1, detachedNodeId1.minor + 1)),
+				{ root, index: 1 },
+			);
+		});
+	});
+
+	it("ranges returns all created fields", () => {
 		const detachedIndex = makeDetachedFieldIndex();
 
 		const revisionTag1 = mintRevisionTag();
@@ -397,22 +1024,31 @@ describe("DetachedFieldIndex methods", () => {
 		const detachedNodeId2 = makeDetachedNodeId(undefined, 2);
 
 		const revisionTag2 = mintRevisionTag();
-		const rootId1 = detachedIndex.createEntry(detachedNodeId1, revisionTag2);
-		const rootId2 = detachedIndex.createEntry(detachedNodeId2, revisionTag2, 2);
+		const rootId1 = detachedIndex.createRange(detachedNodeId1, revisionTag2);
+		const rootId2 = detachedIndex.createRange(detachedNodeId2, revisionTag2, 2);
 
-		const entries = [...detachedIndex.entries()];
-		assert.deepEqual(entries, [
-			{ root: rootId1, latestRelevantRevision: revisionTag2, id: detachedNodeId1 },
-			{ root: rootId2, latestRelevantRevision: revisionTag2, id: detachedNodeId2 },
-			{
-				root: rootId2 + 1,
-				latestRelevantRevision: revisionTag2,
-				id: makeDetachedNodeId(undefined, 3),
-			},
-		]);
+		assert.deepEqual(
+			[...detachedIndex.ranges()],
+			[
+				{
+					root: rootId1,
+					index: 0,
+					count: 1,
+					latestRelevantRevision: revisionTag2,
+					id: detachedNodeId1,
+				},
+				{
+					root: rootId2,
+					index: 0,
+					count: 2,
+					latestRelevantRevision: revisionTag2,
+					id: detachedNodeId2,
+				},
+			],
+		);
 	});
 
-	it("deleteRootsLastTouchedByRevision removes entries", () => {
+	it("removes ranges last touched by a revision without removing newer ranges", () => {
 		const detachedIndex = makeDetachedFieldIndex();
 
 		const revisionTag1 = mintRevisionTag();
@@ -420,38 +1056,44 @@ describe("DetachedFieldIndex methods", () => {
 		const detachedNodeId2 = makeDetachedNodeId(revisionTag1, 2);
 
 		const revisionTag2 = mintRevisionTag();
-		detachedIndex.createEntry(detachedNodeId1, revisionTag2);
-		detachedIndex.createEntry(detachedNodeId2, revisionTag2, 2);
+		detachedIndex.createRange(detachedNodeId1, revisionTag2);
+		detachedIndex.createRange(detachedNodeId2, revisionTag2, 2);
 
 		const revisionTag3 = mintRevisionTag();
 		const detachedNodeId3 = makeDetachedNodeId(revisionTag1, 4);
-		const undeletedRootId = detachedIndex.createEntry(detachedNodeId3, revisionTag3);
+		const undeletedRootId = detachedIndex.createRange(detachedNodeId3, revisionTag3);
 
-		detachedIndex.deleteRootsLastTouchedByRevision(revisionTag2);
-		assert.equal(detachedIndex.tryGetEntry(detachedNodeId1), undefined);
-		assert.equal(detachedIndex.tryGetEntry(detachedNodeId2), undefined);
-		assert.equal(detachedIndex.tryGetEntry(makeDetachedNodeId(revisionTag1, 3)), undefined);
-		assert.equal(detachedIndex.tryGetEntry(detachedNodeId3), undeletedRootId);
+		for (const { id, count } of detachedIndex.getRangesLastTouchedByRevision(revisionTag2)) {
+			const { root, index } = detachedIndex.getLocation(id);
+			detachedIndex.deleteRange(root, { start: index, end: index + count });
+		}
+		assert.equal(detachedIndex.tryGetLocation(detachedNodeId1), undefined);
+		assert.equal(detachedIndex.tryGetLocation(detachedNodeId2), undefined);
+		assert.equal(detachedIndex.tryGetLocation(makeDetachedNodeId(revisionTag1, 3)), undefined);
+		assert.deepEqual(detachedIndex.tryGetLocation(detachedNodeId3), {
+			root: undeletedRootId,
+			index: 0,
+		});
 	});
 
-	it("deleteRootsLastTouchedByRevision for an unknown revision does not throw", () => {
+	it("getRangesLastTouchedByRevision returns no ranges for an unknown revision", () => {
 		const detachedIndex = makeDetachedFieldIndex();
 		const revisionTag1 = mintRevisionTag();
-		assert.doesNotThrow(() => detachedIndex.deleteRootsLastTouchedByRevision(revisionTag1));
+		assert.deepEqual([...detachedIndex.getRangesLastTouchedByRevision(revisionTag1)], []);
 	});
 
-	it("deleteEntry removes single entry, and throws if entry does not exist", () => {
+	it("deleteRange removes a singleton field, and throws if the field does not exist", () => {
 		const detachedIndex = makeDetachedFieldIndex();
 
 		const revisionTag1 = mintRevisionTag();
 		const detachedNodeId1 = makeDetachedNodeId(revisionTag1, 1);
 
 		const revisionTag2 = mintRevisionTag();
-		detachedIndex.createEntry(detachedNodeId1, revisionTag2);
+		const root = detachedIndex.createRange(detachedNodeId1, revisionTag2);
 
-		detachedIndex.deleteEntry(detachedNodeId1);
-		assert.equal(detachedIndex.tryGetEntry(detachedNodeId1), undefined);
-		assert.throws(() => detachedIndex.deleteEntry(detachedNodeId1));
+		detachedIndex.deleteRange(root, { start: 0, end: 1 });
+		assert.equal(detachedIndex.tryGetLocation(detachedNodeId1), undefined);
+		assert.throws(() => detachedIndex.deleteRange(root, { start: 0, end: 1 }));
 	});
 
 	it("purge removes all entries", () => {
@@ -462,11 +1104,12 @@ describe("DetachedFieldIndex methods", () => {
 		const detachedNodeId2 = makeDetachedNodeId(revisionTag1, 2);
 
 		const revisionTag2 = mintRevisionTag();
-		detachedIndex.createEntry(detachedNodeId1, revisionTag2);
-		detachedIndex.createEntry(detachedNodeId2, revisionTag2);
+		detachedIndex.createRange(detachedNodeId1, revisionTag2);
+		detachedIndex.createRange(detachedNodeId2, revisionTag2, 2);
 
 		detachedIndex.purge();
-		assert.equal([...detachedIndex.entries()].length, 0);
+		assert.equal([...detachedIndex.ranges()].length, 0);
+		assert.deepEqual([...detachedIndex.getRangesLastTouchedByRevision(revisionTag2)], []);
 	});
 
 	it("loadData preserves maxId and entries, and sets latestRelevantRevision to undefined.", () => {
@@ -476,21 +1119,24 @@ describe("DetachedFieldIndex methods", () => {
 		const detachedNodeId = makeDetachedNodeId(revisionTag1, 1);
 
 		const revisionTag2 = mintRevisionTag();
-		const rootId = detachedIndex.createEntry(detachedNodeId, revisionTag2);
+		const rootId = detachedIndex.createRange(detachedNodeId, revisionTag2);
 
 		const codec = makeDetachedFieldIndexCodec();
 		const encodedDetachedIndex = codec.encode(detachedIndex.getSummaryData());
 
 		const detachedIndex2 = makeDetachedFieldIndex();
 		detachedIndex2.loadData(codec.decode(encodedDetachedIndex));
-		assert.equal(detachedIndex2.tryGetEntry(detachedNodeId), rootId);
+		assert.deepEqual(detachedIndex2.tryGetLocation(detachedNodeId), {
+			root: rootId,
+			index: 0,
+		});
 
-		// Check that loadData set the latestRelevantRevision to undefined.
-		assert.equal([...detachedIndex2.entries()][0].latestRelevantRevision, undefined);
+		// Check that the summary round trip set the latestRelevantRevision to undefined.
+		assert.equal([...detachedIndex2.ranges()][0].latestRelevantRevision, undefined);
 
 		// Check that the maxId is preserved, and doesn't reset
-		const emptyId = detachedIndex2.createEntry(undefined, undefined);
-		assert.equal(rootId + 1, emptyId);
+		const nextId = detachedIndex2.createRange(makeDetachedNodeId(revisionTag1, 2), undefined);
+		assert.equal(rootId + 1, nextId);
 	});
 
 	it("setRevisionsForLoadedData sets latestRelevantRevision, and throws if called more than once.", () => {
@@ -500,50 +1146,53 @@ describe("DetachedFieldIndex methods", () => {
 		const detachedNodeId = makeDetachedNodeId(revisionTag1, 1);
 
 		const revisionTag2 = mintRevisionTag();
-		const rootId = detachedIndex.createEntry(detachedNodeId, revisionTag2);
+		const rootId = detachedIndex.createRange(detachedNodeId, revisionTag2);
 
 		const codec = makeDetachedFieldIndexCodec();
 		const encodedDetachedIndex = codec.encode(detachedIndex.getSummaryData());
 
 		const detachedIndex2 = makeDetachedFieldIndex();
 		detachedIndex2.loadData(codec.decode(encodedDetachedIndex));
-		assert.equal(detachedIndex2.tryGetEntry(detachedNodeId), rootId);
+		assert.deepEqual(detachedIndex2.tryGetLocation(detachedNodeId), {
+			root: rootId,
+			index: 0,
+		});
 
 		// Sets the new revision tag after loading
 		const revisionTag3 = mintRevisionTag();
 		detachedIndex2.setRevisionsForLoadedData(revisionTag3);
-		assert.equal([...detachedIndex2.entries()][0].latestRelevantRevision, revisionTag3);
+		assert.equal([...detachedIndex2.ranges()][0].latestRelevantRevision, revisionTag3);
 		// Check that it was last touched by revisionTag3
 		assert.deepEqual(
-			[...detachedIndex2.getRootsLastTouchedByRevision(revisionTag3)],
-			[rootId],
+			[...detachedIndex2.getRangesLastTouchedByRevision(revisionTag3)],
+			[{ id: detachedNodeId, count: 1 }],
 		);
 
 		// Throws if setRevisionsForLoadedData is called more than once.
 		assert.throws(() => detachedIndex2.setRevisionsForLoadedData(mintRevisionTag()));
 	});
 
-	describe("getRootsLastTouchedByRevision", () => {
-		it("returns rootId, but doesn't work with old revision after calling updateLatestRevision.", () => {
+	describe("getRangesLastTouchedByRevision", () => {
+		it("returns detached node ranges only for the new revision after calling updateLatestRevision.", () => {
 			const detachedIndex = makeDetachedFieldIndex();
 
 			const revisionTag1 = mintRevisionTag();
 			const detachedNodeId = makeDetachedNodeId(revisionTag1, 1);
 
 			const revisionTag2 = mintRevisionTag();
-			const rootId = detachedIndex.createEntry(detachedNodeId, revisionTag2);
+			detachedIndex.createRange(detachedNodeId, revisionTag2, 2);
 			assert.deepEqual(
-				[...detachedIndex.getRootsLastTouchedByRevision(revisionTag2)],
-				[rootId],
+				[...detachedIndex.getRangesLastTouchedByRevision(revisionTag2)],
+				[{ id: detachedNodeId, count: 2 }],
 			);
 
 			const revisionTag3 = mintRevisionTag();
-			detachedIndex.updateLatestRevision(detachedNodeId, revisionTag3);
+			detachedIndex.updateLatestRevision(detachedNodeId, revisionTag3, 2);
 			assert.deepEqual(
-				[...detachedIndex.getRootsLastTouchedByRevision(revisionTag3)],
-				[rootId],
+				[...detachedIndex.getRangesLastTouchedByRevision(revisionTag3)],
+				[{ id: detachedNodeId, count: 2 }],
 			);
-			assert.deepEqual([...detachedIndex.getRootsLastTouchedByRevision(revisionTag2)], []);
+			assert.deepEqual([...detachedIndex.getRangesLastTouchedByRevision(revisionTag2)], []);
 		});
 	});
 
@@ -553,19 +1202,28 @@ describe("DetachedFieldIndex methods", () => {
 		const detachedNodeId = makeDetachedNodeId(revisionTag1, 1);
 
 		const revisionTag2 = mintRevisionTag();
-		const rootId = detachedIndex.createEntry(detachedNodeId, revisionTag2);
+		const rootId = detachedIndex.createRange(detachedNodeId, revisionTag2);
 
 		const detachedIndexClone = detachedIndex.clone();
-		assert.equal(detachedIndexClone.tryGetEntry(detachedNodeId), rootId);
+		assert.deepEqual(detachedIndexClone.tryGetLocation(detachedNodeId), {
+			root: rootId,
+			index: 0,
+		});
 
 		// To check if the maxId from original is preserved
-		const emptyId = detachedIndexClone.createEntry(undefined, undefined);
-		assert.equal(emptyId, rootId + 1);
+		const nextId = detachedIndexClone.createRange(
+			makeDetachedNodeId(revisionTag1, 2),
+			undefined,
+		);
+		assert.equal(nextId, rootId + 1);
 
 		// Check that changes to the clone does not affect the original
-		detachedIndexClone.deleteEntry(detachedNodeId);
-		assert.equal(detachedIndexClone.tryGetEntry(detachedNodeId), undefined);
-		assert.equal(detachedIndex.tryGetEntry(detachedNodeId), rootId);
+		detachedIndexClone.deleteRange(rootId, { start: 0, end: 1 });
+		assert.equal(detachedIndexClone.tryGetLocation(detachedNodeId), undefined);
+		assert.deepEqual(detachedIndex.tryGetLocation(detachedNodeId), {
+			root: rootId,
+			index: 0,
+		});
 	});
 
 	it("toFieldKey created different field keys for different root ids", () => {
@@ -573,8 +1231,8 @@ describe("DetachedFieldIndex methods", () => {
 		const revisionTag1 = mintRevisionTag();
 		const detachedNodeId = makeDetachedNodeId(revisionTag1, 1);
 		const detachedNodeId2 = makeDetachedNodeId(revisionTag1, 2);
-		const rootId = detachedIndex.createEntry(detachedNodeId);
-		const rootId2 = detachedIndex.createEntry(detachedNodeId2);
+		const rootId = detachedIndex.createRange(detachedNodeId, undefined);
+		const rootId2 = detachedIndex.createRange(detachedNodeId2, undefined);
 		assert.notEqual(detachedIndex.toFieldKey(rootId), detachedIndex.toFieldKey(rootId2));
 	});
 
@@ -582,14 +1240,14 @@ describe("DetachedFieldIndex methods", () => {
 		it("invoking a checkpoint restores the index state", () => {
 			const index = makeDetachedFieldIndex();
 			const revisionTag1 = mintRevisionTag();
-			index.createEntry(makeDetachedNodeId(revisionTag1, 1));
+			const root = index.createRange(makeDetachedNodeId(revisionTag1, 1), undefined);
 
 			const originalData = index.getSummaryData();
 			const restore = index.createCheckpoint();
 
 			// Make changes to the index
-			index.deleteEntry(makeDetachedNodeId(revisionTag1, 1));
-			index.createEntry(makeDetachedNodeId(revisionTag1, 2), revisionTag1);
+			index.deleteRange(root, { start: 0, end: 1 });
+			index.createRange(makeDetachedNodeId(revisionTag1, 2), revisionTag1);
 			assert.notDeepEqual(index.getSummaryData(), originalData);
 
 			restore();
@@ -599,14 +1257,14 @@ describe("DetachedFieldIndex methods", () => {
 		it("multiple checkpoints can exist for the same index", () => {
 			const index = makeDetachedFieldIndex();
 			const revisionTag1 = mintRevisionTag();
-			index.createEntry(makeDetachedNodeId(revisionTag1, 1));
+			const root = index.createRange(makeDetachedNodeId(revisionTag1, 1), undefined);
 
 			const originalData = index.getSummaryData();
 			const restore1 = index.createCheckpoint();
 
 			// Make changes to the index
-			index.deleteEntry(makeDetachedNodeId(revisionTag1, 1));
-			index.createEntry(makeDetachedNodeId(revisionTag1, 2), revisionTag1);
+			index.deleteRange(root, { start: 0, end: 1 });
+			index.createRange(makeDetachedNodeId(revisionTag1, 2), revisionTag1);
 			assert.notDeepEqual(index.getSummaryData(), originalData);
 
 			const changedData = index.getSummaryData();
@@ -622,21 +1280,21 @@ describe("DetachedFieldIndex methods", () => {
 		it("a checkpoint can be restored multiple times", () => {
 			const index = makeDetachedFieldIndex();
 			const revisionTag1 = mintRevisionTag();
-			index.createEntry(makeDetachedNodeId(revisionTag1, 1));
+			const root = index.createRange(makeDetachedNodeId(revisionTag1, 1), undefined);
 
 			const originalData = index.getSummaryData();
 			const restore = index.createCheckpoint();
 
 			// Make changes to the index
-			index.deleteEntry(makeDetachedNodeId(revisionTag1, 1));
-			index.createEntry(makeDetachedNodeId(revisionTag1, 2), revisionTag1);
+			index.deleteRange(root, { start: 0, end: 1 });
+			index.createRange(makeDetachedNodeId(revisionTag1, 2), revisionTag1);
 			assert.notDeepEqual(index.getSummaryData(), originalData);
 
 			restore();
 			assert.deepEqual(index.getSummaryData(), originalData);
 
 			// Make more changes to the index
-			index.createEntry(makeDetachedNodeId(revisionTag1, 3), revisionTag1);
+			index.createRange(makeDetachedNodeId(revisionTag1, 3), revisionTag1);
 			assert.notDeepEqual(index.getSummaryData(), originalData);
 
 			restore();
