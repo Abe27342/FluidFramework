@@ -42,7 +42,13 @@ export type ForestRootId = Brand<number, "tree.ForestRootId">;
  * Retain detached node IDs and resolve them again after mutations that can move nodes within or between fields.
  */
 export interface DetachedNodeLocation {
+	/**
+	 * Identifies the whole detached forest field containing the node.
+	 */
 	readonly root: ForestRootId;
+	/**
+	 * The zero-based node index within that field.
+	 */
 	readonly index: NodeIndex;
 }
 
