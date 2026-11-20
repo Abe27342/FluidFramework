@@ -14,7 +14,7 @@ import {
 	type ChangeFamily,
 	type ChangeFamilyEditor,
 	type ChangeRebaser,
-	type DeltaDetachedNodeId,
+	type DetachedNodeRange,
 	type DeltaRoot,
 	type NormalizedFieldUpPath,
 	type NormalizedUpPath,
@@ -109,7 +109,7 @@ export function intoDelta(taggedChange: TaggedChange<ModularChangeset>): DeltaRo
 }
 
 /**
- * Returns the set of removed roots that should be in memory for the given change to be applied.
+ * Returns ranges of detached node IDs that should be in memory for the given change to be applied.
  * A removed root is relevant if any of the following is true:
  * - It is being inserted
  * - It is being restored
@@ -122,7 +122,7 @@ export function intoDelta(taggedChange: TaggedChange<ModularChangeset>): DeltaRo
  *
  * @param change - The change to be applied.
  */
-export function relevantRemovedRoots(change: ModularChangeset): Iterable<DeltaDetachedNodeId> {
+export function relevantRemovedRoots(change: ModularChangeset): Iterable<DetachedNodeRange> {
 	return relevantModularRemovedRoots(change);
 }
 
