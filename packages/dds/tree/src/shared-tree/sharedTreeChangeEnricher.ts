@@ -100,12 +100,12 @@ export class SharedTreeChangeEnricher {
 	private getDetachedRoot(id: DeltaDetachedNodeId): TreeChunk | undefined {
 		this.purgeChangeQueue();
 		const state = this.owned ?? this.borrowed;
-		const root = state.removedRoots.tryGetEntry(id);
-		if (root !== undefined) {
+		const location = state.removedRoots.tryGetLocation(id);
+		if (location !== undefined) {
 			const cursor = state.forest.getCursorAboveDetachedFields();
-			const parentField = state.removedRoots.toFieldKey(root);
+			const parentField = state.removedRoots.toFieldKey(location.root);
 			cursor.enterField(parentField);
-			cursor.enterNode(0);
+			cursor.enterNode(location.index);
 			this.onRefresherAdded?.();
 			return chunkTree(cursor, {
 				policy: defaultChunkPolicy,
