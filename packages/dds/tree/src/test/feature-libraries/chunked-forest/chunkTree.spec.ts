@@ -33,6 +33,7 @@ import {
 	basicOnlyChunkPolicy,
 	basicChunkTree,
 	chunkField,
+	chunkFieldRange,
 	chunkFieldSingle,
 	chunkRange,
 	coalesceUniformChunks,
@@ -487,6 +488,65 @@ describe("chunkTree", () => {
 				false,
 			);
 			assert.deepEqual(chunks, []);
+		});
+	});
+
+	describe("chunkFieldRange", () => {
+		it("retains compact uniform chunks at partial boundaries and releases excluded references", () => {
+			const shape = new TreeShape(brand(numberSchema.identifier), true, []);
+			const chunks = [
+				new UniformChunk(shape.withTopLevelLength(4), [0, 1, 2, 3]),
+				new UniformChunk(shape.withTopLevelLength(4), [4, 5, 6, 7]),
+				new UniformChunk(shape.withTopLevelLength(4), [8, 9, 10, 11]),
+			];
+			const source = new SequenceChunk(chunks);
+			const cursor = source.cursor();
+			const slice = chunkFieldRange(
+				cursor,
+				{ policy: defaultChunkPolicy, idCompressor: undefined },
+				{ start: 2, end: 10 },
+			);
+			assert.equal(cursor.mode, CursorLocationType.Fields);
+			assert.equal(slice.topLevelLength, 8);
+			assert(slice instanceof SequenceChunk);
+			assert(slice.subChunks.every((chunk) => chunk instanceof UniformChunk));
+			assert.deepEqual(
+				slice.subChunks.flatMap((chunk) => chunk.values),
+				[2, 3, 4, 5, 6, 7, 8, 9],
+			);
+			assert.equal(slice.subChunks[1], chunks[1]);
+			assert.deepEqual(
+				chunks.map((chunk) => chunk.isShared()),
+				[false, true, false],
+			);
+			slice.referenceRemoved();
+			assert.deepEqual(
+				chunks.map((chunk) => chunk.isShared()),
+				[false, false, false],
+			);
+			source.referenceRemoved();
+			assert(chunks.every((chunk) => chunk.isUnreferenced()));
+		});
+
+		it("reuses a complete interior chunk without retaining unrelated chunks", () => {
+			const shape = new TreeShape(brand(numberSchema.identifier), true, []);
+			const chunks = [0, 1, 2].map(
+				(value) => new UniformChunk(shape.withTopLevelLength(2), [value, value]),
+			);
+			const source = new SequenceChunk(chunks);
+			const slice = chunkFieldRange(
+				source.cursor(),
+				{ policy: defaultChunkPolicy, idCompressor: undefined },
+				{ start: 2, end: 4 },
+			);
+			assert.equal(slice, chunks[1]);
+			assert.deepEqual(
+				chunks.map((chunk) => chunk.isShared()),
+				[false, true, false],
+			);
+			slice.referenceRemoved();
+			source.referenceRemoved();
+			assert(chunks.every((chunk) => chunk.isUnreferenced()));
 		});
 	});
 

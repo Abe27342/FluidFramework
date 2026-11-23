@@ -6,7 +6,6 @@
 import {
 	cheapRebaseValidation,
 	deltaFieldMapHasChanges,
-	expandDetachedFieldRanges,
 	makeAnonChange,
 	makeChangeAtomId,
 	makeDetachedFieldIndex,
@@ -21,7 +20,7 @@ import {
 	type TreeChunk,
 } from "../../core/index.js";
 import { brand, type Mutable, type RangeQueryResult } from "../../util/index.js";
-import { chunkTree, defaultChunkPolicy } from "../chunked-forest/index.js";
+import { chunkFieldRange, defaultChunkPolicy } from "../chunked-forest/index.js";
 import {
 	getFromChangeAtomIdMap,
 	newChangeAtomIdBTree,
@@ -593,41 +592,39 @@ class ModularChangeMinimizer {
 		(deltaForBuilds as Mutable<DeltaRoot<unknown>>).fields = new Map();
 
 		const forest = forestFactory();
-		const detachedFieldIndex = makeDetachedFieldIndex();
+		const detachedFieldIndex = makeDetachedFieldIndex("Temp");
 
-		visitDelta(deltaForBuilds, forest.acquireVisitor(), detachedFieldIndex, undefined);
+		const visitor = forest.acquireVisitor();
+		visitDelta(deltaForBuilds, visitor, detachedFieldIndex, undefined, true);
+		visitor.free();
 		const squashedBuilds = newChangeAtomIdBTree<TreeChunk>();
 		const cursor = forest.getCursorAboveDetachedFields();
-		for (const entry of expandDetachedFieldRanges(detachedFieldIndex.ranges())) {
+		for (const entry of detachedFieldIndex.ranges()) {
 			cursor.enterField(detachedFieldIndex.toFieldKey(entry.root));
-
-			const rootId: ChangeAtomId = {
-				revision: entry.id.major,
-				localId: brand(entry.id.minor),
-			};
-
-			const attachEntry = getAttachFieldForDetach(
-				residualChange.crossFieldKeys,
-				residualChange.rootNodes,
-				rootId,
-				1,
-			);
-			assert(
-				attachEntry.length === 1,
-				0xd3b /* TODO: Handle chunks which are only partially attached */,
-			);
-
-			const isAttached = attachEntry.value !== undefined;
-			if (isAttached) {
-				cursor.enterNode(entry.index);
-				setInChangeAtomIdMap(
-					squashedBuilds,
+			for (let offset = 0; offset < entry.count; ) {
+				const rootId: ChangeAtomId = {
+					revision: entry.id.major,
+					localId: brand(entry.id.minor + offset),
+				};
+				const attachEntry = getAttachFieldForDetach(
+					residualChange.crossFieldKeys,
+					residualChange.rootNodes,
 					rootId,
-					chunkTree(cursor, { policy: defaultChunkPolicy, idCompressor: undefined }),
+					entry.count - offset,
 				);
-				cursor.exitNode();
+				if (attachEntry.value !== undefined) {
+					setInChangeAtomIdMap(
+						squashedBuilds,
+						rootId,
+						chunkFieldRange(
+							cursor,
+							{ policy: defaultChunkPolicy, idCompressor: undefined },
+							{ start: entry.index + offset, end: entry.index + offset + attachEntry.length },
+						),
+					);
+				}
+				offset += attachEntry.length;
 			}
-
 			cursor.exitField();
 		}
 

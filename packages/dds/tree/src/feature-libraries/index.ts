@@ -114,6 +114,7 @@ export {
 	type TreeChunk,
 	chunkTree,
 	chunkField,
+	chunkFieldRange,
 	chunkFieldSingle,
 	buildChunkedForest,
 	defaultChunkPolicy,

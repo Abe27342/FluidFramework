@@ -13,6 +13,7 @@ import {
 import { currentVersion, type CodecWriteOptions } from "../../codec/index.js";
 import {
 	type DeltaDetachedNodeId,
+	type DetachedNodeRange,
 	type TreeStoredSchema,
 	makeAnonChange,
 	revisionMetadataSourceFromInfo,
@@ -33,7 +34,9 @@ import {
 	FieldBatchFormatVersion,
 	CompareAndSwapSchemaChangeset,
 	type SchemaChangeset,
+	updateRefreshers as updateModularRefreshers,
 } from "../../feature-libraries/index.js";
+import type { RangeQueryResult } from "../../util/index.js";
 import {
 	ConstraintStatus,
 	getConstraintStatus,
@@ -319,17 +322,23 @@ describe("SharedTreeChangeFamily", () => {
 
 		function updateDataChangeRefreshers(
 			change: ModularChangeset,
-			getDetachedNode: (id: DeltaDetachedNodeId) => TreeChunk | undefined,
-			removedRoots: Iterable<DeltaDetachedNodeId>,
+			getDetachedNodes: (
+				id: DeltaDetachedNodeId,
+				count: number,
+			) => RangeQueryResult<TreeChunk | undefined>,
+			removedRoots: Iterable<DetachedNodeRange>,
 			requireRefreshers: boolean,
 		): ModularChangeset {
 			const mockChange = change as unknown as MockChange;
-			const relevantToChange = new Set<DeltaDetachedNodeId>(mockChange.relevant ?? []);
+			const relevantToChange = mockChange.relevant ?? [];
 			const refreshers: string[] = [];
-			for (const id of removedRoots) {
+			for (const { id, count } of removedRoots) {
 				// Check that the removed root is indeed relevant to the change
-				assert.equal(relevantToChange.has(id), true);
-				const tree = getDetachedNode(id);
+				assert.equal(
+					relevantToChange.some((root) => root.major === id.major && root.minor === id.minor),
+					true,
+				);
+				const { value: tree } = getDetachedNodes(id, count);
 				if (tree === undefined) {
 					if (requireRefreshers) {
 						throw new Error("Missing tree");
@@ -349,23 +358,23 @@ describe("SharedTreeChangeFamily", () => {
 			deepFreeze(input);
 			const updated = updateRefreshers(
 				input,
-				// Mock for getDetachedNode
-				(id): TreeChunk | undefined => {
-					switch (id) {
-						case idInForest1: {
-							return refresher1;
+				// Mock for getDetachedNodes
+				(id, count): RangeQueryResult<TreeChunk | undefined> => {
+					switch (id.minor) {
+						case idInForest1.minor: {
+							return { value: refresher1, length: count };
 						}
-						case idInForest2: {
-							return refresher2;
+						case idInForest2.minor: {
+							return { value: refresher2, length: count };
 						}
 						default: {
-							return undefined;
+							return { value: undefined, length: count };
 						}
 					}
 				},
 				// Mock for relevantRemovedRootsFromDataChange
-				(change: ModularChangeset): DeltaDetachedNodeId[] =>
-					(change as unknown as MockChange).relevant ?? [],
+				(change: ModularChangeset): DetachedNodeRange[] =>
+					((change as unknown as MockChange).relevant ?? []).map((id) => ({ id, count: 1 })),
 				updateDataChangeRefreshers,
 			);
 			return refreshersFromSharedTreeChange(updated);
@@ -417,6 +426,45 @@ describe("SharedTreeChangeFamily", () => {
 			];
 			const updated = testUpdateRefreshers(input);
 			assert.deepEqual(updated, [[refresher1], [refresher2]]);
+		});
+		it("filters covered spans from later changes without expanding detached node IDs", () => {
+			const dataChanges = Array.from({ length: 3 }, () => ({
+				...ModularChangeFamily.emptyChange,
+			}));
+			const relevant: DetachedNodeRange[][] = [
+				[{ id: { minor: 100 }, count: 1000 }],
+				[{ id: { minor: 0 }, count: 1200 }],
+				[{ id: { minor: 0 }, count: 1200 }],
+			];
+			const queries: DetachedNodeRange[] = [];
+			const updated = updateRefreshers(
+				{
+					changes: dataChanges.flatMap((innerChange) => [
+						{ type: "data" as const, innerChange },
+						schemaChange,
+					]),
+				},
+				(id, count) => {
+					queries.push({ id, count });
+					return {
+						value: chunkFromJsonTrees(Array.from({ length: count }, (_, i) => id.minor + i)),
+						length: count,
+					};
+				},
+				(change) => relevant[dataChanges.indexOf(change)],
+				updateModularRefreshers,
+			);
+			assert.deepEqual(queries, [
+				{ id: { minor: 100 }, count: 1000 },
+				{ id: { minor: 0 }, count: 100 },
+				{ id: { minor: 1100 }, count: 100 },
+			]);
+			assert.deepEqual(
+				updated.changes
+					.filter((change) => change.type === "data")
+					.map((change) => change.innerChange.refreshers?.size ?? 0),
+				[1, 2, 0],
+			);
 		});
 	});
 

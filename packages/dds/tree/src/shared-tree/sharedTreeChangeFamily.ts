@@ -13,12 +13,15 @@ import {
 	type ChangeFamily,
 	type ChangeRebaser,
 	type DeltaDetachedNodeId,
+	type DetachedNodeRange,
 	type RevisionMetadataSource,
 	type RevisionReplacer,
 	type RevisionTag,
 	type RevisionTagCodec,
 	type TaggedChange,
 	mapTaggedChange,
+	makeChangeAtomId,
+	newChangeAtomIdRangeMap,
 	type ProcessChangeFn,
 } from "../core/index.js";
 import {
@@ -32,13 +35,7 @@ import {
 	isModularChangesetValid,
 	makeModularChangeCodecFamily,
 } from "../feature-libraries/index.js";
-import {
-	type Mutable,
-	type NestedSet,
-	addToNestedSet,
-	hasSingle,
-	nestedSetContains,
-} from "../util/index.js";
+import { type Mutable, type RangeQueryResult, brand, hasSingle } from "../util/index.js";
 
 import { makeSharedTreeChangeCodecFamily } from "./sharedTreeChangeCodecs.js";
 import type { SharedTreeChange } from "./sharedTreeChangeTypes.js";
@@ -299,20 +296,29 @@ export function mapDataChanges(
 /**
  * Produces an equivalent change with an updated set of appropriate refreshers.
  * @param change - The change to compute refreshers for. Not mutated.
- * @param getDetachedNode - retrieves a {@link TreeChunk} for the corresponding detached node id.
+ * @param getDetachedNodes - Retrieves a nonempty prefix of the requested detached node IDs.
+ * The returned length must not exceed the requested count.
+ * A defined value transfers one owned chunk reference with that top-level length.
+ * An undefined value identifies a missing prefix.
  * Is expected to read from a forest in a state that corresponds to the input context of the given change.
  * @returns An equivalent change with an updated set of appropriate refreshers.
  */
 export function updateRefreshers(
 	change: SharedTreeChange,
-	getDetachedNode: (id: DeltaDetachedNodeId) => TreeChunk | undefined,
+	getDetachedNodes: (
+		id: DeltaDetachedNodeId,
+		count: number,
+	) => RangeQueryResult<TreeChunk | undefined>,
 	relevantRemovedRootsFromDataChange: (
 		taggedChange: ModularChangeset,
-	) => Iterable<DeltaDetachedNodeId>,
+	) => Iterable<DetachedNodeRange>,
 	updateDataChangeRefreshers: (
 		change: ModularChangeset,
-		getDetachedNode: (id: DeltaDetachedNodeId) => TreeChunk | undefined,
-		removedRoots: Iterable<DeltaDetachedNodeId>,
+		getDetachedNodes: (
+			id: DeltaDetachedNodeId,
+			count: number,
+		) => RangeQueryResult<TreeChunk | undefined>,
+		removedRoots: Iterable<DetachedNodeRange>,
 		requireRefreshers: boolean,
 	) => ModularChangeset,
 ): SharedTreeChange {
@@ -330,22 +336,38 @@ export function updateRefreshers(
 	// B) correspond to trees that were removed by earlier data changes
 	// Set A is excluded by tracking which roots have already been included in the earlier data changes, and filtering
 	// them out from the relevant removed roots.
-	// Set B is excluded because the `getDetachedNode` is bound to return `undefined` for them, which tell
+	// Set B is excluded because `getDetachedNodes` is bound to return an undefined value for them, which tells
 	// `defaultUpdateRefreshers` to ignore. One downside of this approach is that it prevents `defaultUpdateRefreshers`
 	// from detecting cases where a detached node is missing for another reason (which would be a bug).
 
 	// The roots that have been included as refreshers across all data changes so far.
-	const includedRoots: NestedSet<RevisionTag | undefined, number> = new Map();
-	function getAndRememberDetachedNode(id: DeltaDetachedNodeId): TreeChunk | undefined {
-		addToNestedSet(includedRoots, id.major, id.minor);
-		return getDetachedNode(id);
+	const includedRoots = newChangeAtomIdRangeMap<boolean>();
+	function getAndRememberDetachedNodes(
+		id: DeltaDetachedNodeId,
+		count: number,
+	): RangeQueryResult<TreeChunk | undefined> {
+		const result = getDetachedNodes(id, count);
+		assert(
+			Number.isSafeInteger(result.length) && result.length > 0 && result.length <= count,
+			"Detached nodes must cover a nonempty prefix of the requested range",
+		);
+		includedRoots.set(makeChangeAtomId(brand(id.minor), id.major), result.length, true);
+		return result;
 	}
 	function* filterIncludedRoots(
-		toFilter: Iterable<DeltaDetachedNodeId>,
-	): Iterable<DeltaDetachedNodeId> {
-		for (const id of toFilter) {
-			if (!nestedSetContains(includedRoots, id.major, id.minor)) {
-				yield id;
+		toFilter: Iterable<DetachedNodeRange>,
+	): Iterable<DetachedNodeRange> {
+		for (const { id, count } of toFilter) {
+			for (const entry of includedRoots.getAll(
+				makeChangeAtomId(brand(id.minor), id.major),
+				count,
+			)) {
+				if (entry.value === undefined) {
+					yield {
+						id: { major: id.major, minor: id.minor + entry.offset },
+						count: entry.length,
+					};
+				}
 			}
 		}
 	}
@@ -356,14 +378,14 @@ export function updateRefreshers(
 			isFirstDataChange = false;
 			return updateDataChangeRefreshers(
 				dataChange,
-				getAndRememberDetachedNode,
+				getAndRememberDetachedNodes,
 				removedRoots,
 				true,
 			);
 		} else {
 			return updateDataChangeRefreshers(
 				dataChange,
-				getAndRememberDetachedNode,
+				getAndRememberDetachedNodes,
 				filterIncludedRoots(removedRoots),
 				false,
 			);
