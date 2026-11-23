@@ -453,10 +453,11 @@ export function testForest(config: ForestTestConfiguration): void {
 			build: [{ id: unrelatedId, trees: chunkFromJsonTrees(["detached"]) }],
 			detachedFieldIndex: index,
 		});
+		const unrelatedLocation = index.getLocation(unrelatedId);
 		const unrelatedPath: UpPath = {
 			parent: undefined,
-			parentField: index.toFieldKey(index.getEntry(unrelatedId)),
-			parentIndex: 0,
+			parentField: index.toFieldKey(unrelatedLocation.root),
+			parentIndex: unrelatedLocation.index,
 		};
 		const unrelated = forest.anchors.track(unrelatedPath);
 		const delta: DeltaRoot = {
@@ -514,9 +515,10 @@ export function testForest(config: ForestTestConfiguration): void {
 		assert.equal(destroyed, true);
 		assert.equal(forest.anchors.locate(cycleAnchor), undefined);
 		assert.equal(forest.anchors.locate(cycleChild), undefined);
-		const entries = [...index.entries()];
+		const entries = [...index.ranges()];
 		assert.equal(entries.length, 1);
 		assert.deepEqual(entries[0].id, unrelatedId);
+		assert.equal(entries[0].count, 1);
 		assert.deepEqual(readField(index.toFieldKey(entries[0].root)), ["detached"]);
 		expectEqualPaths(forest.anchors.locate(unrelated), unrelatedPath);
 	});

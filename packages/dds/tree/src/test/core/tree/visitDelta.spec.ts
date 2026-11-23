@@ -252,7 +252,7 @@ describe("visitDelta", () => {
 		it(`finishes remaining edits before destroying a cycle (attachment offset: ${cycleOffset})`, () => {
 			const index = makeDetachedFieldIndex("");
 			for (let minor = 42; minor < 46; minor++) {
-				index.createEntry({ minor });
+				index.createRange({ minor }, undefined);
 			}
 			const cyclicField = cycleOffset === 0 ? field0 : field1;
 			const incomingField = cycleOffset === 0 ? field1 : field0;
