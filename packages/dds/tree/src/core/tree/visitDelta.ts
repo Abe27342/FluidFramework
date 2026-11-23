@@ -17,7 +17,11 @@ import type { FieldKey } from "../schema-stored/index.js";
 import type { TreeChunk } from "./chunk.js";
 import { mapCursorField, type ITreeCursorSynchronous } from "./cursor.js";
 import type * as Delta from "./delta.js";
-import { areDetachedNodeIdsEqual, offsetDetachId } from "./deltaUtil.js";
+import {
+	areDetachedNodeIdsEqual,
+	deltaFieldMapHasChanges,
+	offsetDetachId,
+} from "./deltaUtil.js";
 import type { DetachedFieldIndex } from "./detachedFieldIndex.js";
 import type { ForestRootId, Major, Minor } from "./detachedFieldIndexTypes.js";
 import type { NodeIndex, PlaceIndex, Range } from "./pathTree.js";
@@ -224,7 +228,23 @@ function fixedPointVisitOfRoots(
 				deleteFromNestedMap(roots, major, minor);
 				const id = { major, minor };
 				config.currentRoot = id;
-				const { root, index } = config.detachedFieldIndex.getLocation(id);
+				let { root, index } = config.detachedFieldIndex.getLocation(id);
+				if (
+					deltaFieldMapHasChanges(modifications) &&
+					config.detachedFieldIndex.getFieldLength(root) > 1
+				) {
+					// Nested edits can consume siblings, even indirectly through other pending roots.
+					// Move the edited root before descending so its active field cannot be a sibling source.
+					const source = config.detachedFieldIndex.toFieldKey(root);
+					const range = { start: index, end: index + 1 };
+					config.detachedFieldIndex.deleteRange(root, range);
+					// Every pending root was created, modified, or renamed at latestRevision.
+					root = config.detachedFieldIndex.createRange(id, config.latestRevision);
+					visitor.enterField(source);
+					visitor.detach(range, config.detachedFieldIndex.toFieldKey(root), id, false);
+					visitor.exitField(source);
+					index = 0;
+				}
 				const field = config.detachedFieldIndex.toFieldKey(root);
 				visitor.enterField(field);
 				// Note: each visit may lead to `roots` being populated with new entries or having some entries removed.
@@ -662,6 +682,10 @@ function tryReplace(
 		const source = config.detachedFieldIndex.getFirst(id, mark.count - offset);
 		if (
 			source.value === undefined ||
+			(config.currentRoot !== undefined &&
+				config.currentRoot.major === id.major &&
+				config.currentRoot.minor >= id.minor &&
+				config.currentRoot.minor < id.minor + source.length) ||
 			firstRootChangeOffset(config.detachPassRoots, id, source.length) < source.length ||
 			firstRootChangeOffset(config.attachPassRoots, id, source.length) < source.length
 		) {
@@ -821,6 +845,12 @@ function attachPass(
 					config.currentRoot !== undefined &&
 					areDetachedNodeIdsEqual(offsetAttachId, config.currentRoot)
 				) {
+					assert(
+						count === 1 &&
+							sourceIndex === 0 &&
+							config.detachedFieldIndex.getFieldLength(root) === 1,
+						"Cycle-closing attachments must consume an isolated root",
+					);
 					config.cyclicRoots.push(root);
 					omittedAttaches += count;
 				} else {

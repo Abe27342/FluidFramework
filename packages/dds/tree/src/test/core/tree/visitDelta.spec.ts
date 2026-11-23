@@ -17,9 +17,12 @@ import {
 	type DeltaVisitor,
 	type DetachedFieldIndex,
 	type DetachedFieldRange,
+	EmptyKey,
 	type FieldKey,
+	type IEditableForest,
 	type MapTree,
 	type RevisionTag,
+	type UpPath,
 	TreeStoredSchemaRepository,
 	combineVisitors,
 	createAnnouncedVisitor,
@@ -32,6 +35,7 @@ import {
 } from "../../../core/index.js";
 import {
 	buildChunkedForest,
+	buildForest,
 	defaultIncrementalEncodingPolicy,
 	defaultSchemaPolicy,
 	makeTreeChunker,
@@ -42,13 +46,16 @@ import {
 	UniformChunk,
 	// eslint-disable-next-line import-x/no-internal-modules
 } from "../../../feature-libraries/chunked-forest/uniformChunk.js";
+import { JsonAsTree } from "../../../jsonDomainSchema.js";
 import { numberSchema } from "../../../simple-tree/index.js";
-import { brand, makeArray } from "../../../util/index.js";
-import { cursorToJsonObject } from "../../json/index.js";
+import { Breakable, brand, makeArray, type JsonCompatible } from "../../../util/index.js";
+import { initializeForest } from "../../feature-libraries/index.js";
+import { cursorToJsonObject, fieldJsonCursor } from "../../json/index.js";
 import { jsonSequenceRootSchema } from "../../sequenceRootUtils.js";
 import {
 	chunkFromJsonTrees,
 	chunkToMapTreeField,
+	expectEqualPaths,
 	mintRevisionTag,
 	rootFromDeltaFieldMap,
 	type DeltaParams,
@@ -201,6 +208,420 @@ const field2: FieldKey = brand("-2");
 const field3: FieldKey = brand("-3");
 
 describe("visitDelta", () => {
+	describe("detached source ancestry", () => {
+		function readField(forest: IEditableForest, field: FieldKey): JsonCompatible[] {
+			const cursor = forest.getCursorAboveDetachedFields();
+			cursor.enterField(field);
+			return mapCursorField(cursor, cursorToJsonObject);
+		}
+
+		function setup(
+			kind: "object" | "chunked" | "uniform" | "shared uniform",
+			content: JsonCompatible[] = [[0], [1], [2], [3]],
+			grouped = true,
+		) {
+			const schema = new TreeStoredSchemaRepository(jsonSequenceRootSchema);
+			let original: IEditableForest;
+			if (kind === "object") {
+				original = buildForest(new Breakable("detached source ancestry"), schema);
+				initializeForest(original, fieldJsonCursor(content));
+			} else {
+				const chunked = buildChunkedForest(
+					makeTreeChunker(schema, defaultSchemaPolicy, defaultIncrementalEncodingPolicy),
+				);
+				if (kind === "uniform" || kind === "shared uniform") {
+					const leaf = new TreeShape(brand(numberSchema.identifier), true, []);
+					const array = new TreeShape(brand(JsonAsTree.Array.identifier), false, [
+						[EmptyKey, leaf, 1],
+					]);
+					chunked.roots.fields.set(rootFieldKey, [
+						new UniformChunk(array.withTopLevelLength(4), [0, 1, 2, 3]),
+					]);
+				} else {
+					initializeForest(chunked, fieldJsonCursor(content));
+				}
+				original = chunked;
+			}
+			let forest = original;
+			let index = makeDetachedFieldIndex("");
+			const oldRevision = mintRevisionTag();
+			const revision = mintRevisionTag();
+			const detaches: number[] = [];
+			const apply = (
+				delta: DeltaRoot,
+				allowGroupedDetaches = false,
+				latest = revision,
+			): void => {
+				const visitor = combineVisitors([
+					createSourceValidationVisitor(),
+					createAnnouncedVisitor({
+						detach: (range) => detaches.push(range.end - range.start),
+					}),
+					forest.acquireVisitor(),
+					forest.anchors.acquireVisitor(),
+				]);
+				try {
+					visitDelta(delta, visitor, index, latest, allowGroupedDetaches);
+				} finally {
+					visitor.free();
+				}
+			};
+			apply(
+				{
+					fields: new Map([
+						[rootFieldKey, { marks: [{ count: content.length, detach: { minor: 0 } }] }],
+					]),
+				},
+				grouped,
+				oldRevision,
+			);
+			if (kind === "shared uniform") {
+				forest = original.clone(schema);
+				index = index.clone();
+			}
+			detaches.length = 0;
+			const path = (minor: number): UpPath => {
+				const location = index.getLocation({ minor });
+				return {
+					parent: undefined,
+					parentField: index.toFieldKey(location.root),
+					parentIndex: location.index,
+				};
+			};
+			const readRoot = (minor: number): JsonCompatible => {
+				const location = index.getLocation({ minor });
+				return readField(forest, index.toFieldKey(location.root))[location.index];
+			};
+			return {
+				forest,
+				original,
+				index,
+				apply,
+				readRoot,
+				path,
+				detaches,
+				oldRevision,
+				revision,
+			};
+		}
+
+		for (const kind of ["object", "chunked", "uniform", "shared uniform"] as const) {
+			for (const operation of ["attach", "replace"] as const) {
+				for (const before of [true, false]) {
+					for (const policy of [false, true]) {
+						it(`${operation} consumes a ${before ? "preceding" : "following"} sibling (${kind}, grouped producer: ${policy})`, () => {
+							const { forest, original, index, apply, readRoot, path, oldRevision, revision } =
+								setup(kind);
+							const source = before ? 0 : 1;
+							const target = before ? 1 : 0;
+							const targetAnchor = forest.anchors.track(path(target));
+							const sourceAnchor = forest.anchors.track(path(source));
+							const untouchedAnchor = forest.anchors.track(path(3));
+							const expected = operation === "replace" ? [[source]] : [target, [source]];
+							apply(
+								{
+									global: [
+										{
+											id: { minor: target },
+											fields: new Map([
+												[
+													EmptyKey,
+													{
+														marks: [
+															...(operation === "attach" ? [{ count: 1 }] : []),
+															{
+																count: 1,
+																attach: { minor: source },
+																...(operation === "replace" ? { detach: { minor: 10 } } : {}),
+															},
+														],
+													},
+												],
+											]),
+										},
+									],
+								},
+								policy,
+							);
+							assert.deepEqual(readRoot(target), expected);
+							assert.equal(index.tryGetLocation({ minor: source }), undefined);
+							assert.equal(index.getLocation({ minor: target }).index, 0);
+							assert.equal(index.getFirst({ minor: 2 }, 2).length, 2);
+							assert.deepEqual(
+								[...index.getRangesLastTouchedByRevision(oldRevision)],
+								[{ id: { minor: 2 }, count: 2 }],
+							);
+							assert(
+								[...index.getRangesLastTouchedByRevision(revision)].some(
+									({ id }) => id.minor === target,
+								),
+							);
+							expectEqualPaths(forest.anchors.locate(targetAnchor), path(target));
+							expectEqualPaths(forest.anchors.locate(sourceAnchor), {
+								parent: path(target),
+								parentField: EmptyKey,
+								parentIndex: operation === "replace" ? 0 : 1,
+							});
+							expectEqualPaths(forest.anchors.locate(untouchedAnchor), path(3));
+							if (operation === "replace") {
+								assert.deepEqual(readRoot(10), target);
+							}
+							if (kind === "shared uniform") {
+								assert.deepEqual(readField(original, field0), [[0], [1], [2], [3]]);
+							}
+							apply(
+								{
+									fields: new Map([
+										[rootFieldKey, { marks: [{ count: 1, attach: { minor: target } }] }],
+									]),
+								},
+								policy,
+							);
+							assert.deepEqual(readField(forest, rootFieldKey), [expected]);
+							assert.equal(index.tryGetLocation({ minor: target }), undefined);
+							expectEqualPaths(forest.anchors.locate(targetAnchor), {
+								parent: undefined,
+								parentField: rootFieldKey,
+								parentIndex: 0,
+							});
+							for (const anchor of [targetAnchor, sourceAnchor, untouchedAnchor]) {
+								forest.anchors.forget(anchor);
+							}
+						});
+					}
+				}
+			}
+		}
+
+		it("does not relocate singleton roots", () => {
+			const { apply, readRoot, detaches } = setup("chunked", undefined, false);
+			apply({
+				global: [
+					{
+						id: { minor: 1 },
+						fields: new Map([[EmptyKey, { marks: [{ count: 1, attach: { minor: 0 } }] }]]),
+					},
+				],
+			});
+			assert.deepEqual(readRoot(1), [[0], 1]);
+			assert.deepEqual(detaches, []);
+		});
+
+		for (const reverse of [false, true]) {
+			it(`isolates transitive pending attachments (reverse global order: ${reverse})`, () => {
+				const { apply, readRoot } = setup("chunked");
+				const changes = [
+					{
+						id: { minor: 1 },
+						fields: new Map([[EmptyKey, { marks: [{ count: 1, attach: { minor: 2 } }] }]]),
+					},
+					{
+						id: { minor: 2 },
+						fields: new Map([[EmptyKey, { marks: [{ count: 1, attach: { minor: 0 } }] }]]),
+					},
+				];
+				apply({ global: reverse ? changes.reverse() : changes });
+				assert.deepEqual(readRoot(1), [[[0], 2], 1]);
+				assert.deepEqual(readRoot(3), [3]);
+			});
+		}
+
+		it("resolves fragmented fields and later pending roots after extraction", () => {
+			const { apply, readRoot, index, oldRevision } = setup("chunked", [
+				[0],
+				[1],
+				[2],
+				[3],
+				[4],
+				[5],
+			]);
+			apply({ destroy: [{ id: { minor: 1 }, count: 1 }] });
+			apply({
+				global: [2, 4].map((minor) => ({
+					id: { minor },
+					fields: new Map([
+						[EmptyKey, { marks: [{ count: 1, attach: { minor: minor === 2 ? 0 : 3 } }] }],
+					]),
+				})),
+			});
+			assert.deepEqual(readRoot(2), [[0], 2]);
+			assert.deepEqual(readRoot(4), [[3], 4]);
+			assert.deepEqual(readRoot(5), [5]);
+			assert.deepEqual(index.getLocation({ minor: 5 }), { root: 0, index: 0 });
+			assert.deepEqual(
+				[...index.getRangesLastTouchedByRevision(oldRevision)],
+				[{ id: { minor: 5 }, count: 1 }],
+			);
+		});
+
+		it("replaces a sibling under a root restored by the same delta", () => {
+			const { forest, index, apply, readRoot } = setup("chunked");
+			apply({
+				global: [
+					{
+						id: { minor: 1 },
+						fields: new Map([
+							[
+								EmptyKey,
+								{ marks: [{ count: 1, attach: { minor: 0 }, detach: { minor: 10 } }] },
+							],
+						]),
+					},
+				],
+				fields: new Map([[rootFieldKey, { marks: [{ count: 1, attach: { minor: 1 } }] }]]),
+			});
+			assert.deepEqual(readField(forest, rootFieldKey), [[[0]]]);
+			assert.deepEqual(readRoot(10), 1);
+			assert.equal(index.getFirst({ minor: 2 }, 2).length, 2);
+		});
+
+		for (const kind of ["object", "chunked", "uniform", "shared uniform"] as const) {
+			it(`defers a self-replacement instead of bypassing cycle handling (${kind})`, () => {
+				const { forest, index, apply, readRoot, path } = setup(kind);
+				const escaped = forest.anchors.track({
+					parent: path(1),
+					parentField: EmptyKey,
+					parentIndex: 0,
+				});
+				apply({
+					global: [
+						{
+							id: { minor: 1 },
+							fields: new Map([
+								[
+									EmptyKey,
+									{ marks: [{ count: 1, attach: { minor: 1 }, detach: { minor: 10 } }] },
+								],
+							]),
+						},
+					],
+				});
+				assert.equal(index.tryGetLocation({ minor: 1 }), undefined);
+				assert.deepEqual(readRoot(0), [0]);
+				assert.deepEqual(readRoot(2), [2]);
+				assert.deepEqual(readRoot(3), [3]);
+				assert.deepEqual(readRoot(10), 1);
+				expectEqualPaths(forest.anchors.locate(escaped), path(10));
+				forest.anchors.forget(escaped);
+			});
+		}
+
+		for (const cycleOffset of [0, 1]) {
+			it(`consumes only the cycle ID from uniform grouped input (offset: ${cycleOffset})`, () => {
+				const { index, apply, readRoot } = setup("uniform");
+				apply({
+					global: [
+						{
+							id: { minor: cycleOffset },
+							fields: new Map([
+								[
+									EmptyKey,
+									{
+										marks: [
+											{ count: 2, attach: { minor: 0 } },
+											{ count: 1 },
+											{ count: 1, attach: { minor: 2 } },
+										],
+									},
+								],
+							]),
+						},
+					],
+				});
+				assert.deepEqual(
+					[...index.ranges()].map(({ id, count }) => ({ id, count })),
+					[{ id: { minor: 3 }, count: 1 }],
+				);
+				assert.deepEqual(readRoot(3), [3]);
+			});
+		}
+
+		for (const kind of ["object", "chunked"] as const) {
+			for (const cycleOffset of [0, 1]) {
+				for (const replace of [false, true]) {
+					it(`cleans up only a grouped cycle after later edits (${kind}, offset: ${cycleOffset}, replace: ${replace})`, () => {
+						const { forest, index, apply, readRoot, path } = setup(kind, [
+							[[0]],
+							[[1]],
+							[2],
+							[3],
+							[4],
+						]);
+						const cycleAnchor = forest.anchors.track(path(cycleOffset));
+						const childAnchor = forest.anchors.track({
+							parent: path(cycleOffset),
+							parentField: EmptyKey,
+							parentIndex: 0,
+						});
+						const unrelated = forest.anchors.track(path(4));
+						let destroyed = 0;
+						for (const anchor of [cycleAnchor, childAnchor]) {
+							forest.anchors.locate(anchor)?.events.on("afterDestroy", () => destroyed++);
+						}
+						apply({
+							global: [
+								{
+									id: { minor: cycleOffset },
+									fields: new Map([
+										[
+											EmptyKey,
+											{
+												marks: [
+													{ count: 2, attach: { minor: 0 } },
+													{
+														count: 1,
+														fields: new Map([
+															[
+																EmptyKey,
+																{
+																	marks: [
+																		{
+																			count: 1,
+																			attach: { minor: 2 },
+																			...(replace ? { detach: { minor: 10 } } : {}),
+																		},
+																	],
+																},
+															],
+														]),
+													},
+													{ count: 1, attach: { minor: 3 } },
+												],
+											},
+										],
+									]),
+								},
+							],
+						});
+						assert.equal(destroyed, 2);
+						assert.equal(forest.anchors.locate(cycleAnchor), undefined);
+						assert.equal(forest.anchors.locate(childAnchor), undefined);
+						assert.deepEqual(readRoot(4), [4]);
+						expectEqualPaths(forest.anchors.locate(unrelated), path(4));
+						assert.deepEqual(
+							[...index.ranges()].map(({ id, count }) => ({ id, count })),
+							[
+								{ id: { minor: 4 }, count: 1 },
+								...(replace ? [{ id: { minor: 10 }, count: 1 }] : []),
+							],
+						);
+						const cursor = forest.getCursorAboveDetachedFields();
+						let fields = 0;
+						if (cursor.firstField()) {
+							do {
+								fields++;
+							} while (cursor.nextField());
+						}
+						assert.equal(fields, replace ? 2 : 1);
+						for (const anchor of [cycleAnchor, childAnchor, unrelated]) {
+							forest.anchors.forget(anchor);
+						}
+					});
+				}
+			}
+		}
+	});
+
 	describe("grouped detached fields", () => {
 		for (const count of [16, 65_536]) {
 			it(`detaches and destroys ${count} leaves without per-node visitor or index records`, () => {
@@ -372,7 +793,10 @@ describe("visitDelta", () => {
 				],
 			});
 			assert.deepEqual(
-				read(field0),
+				[100, 101, 102, 103, 104].map((minor) => {
+					const location = index.getLocation({ minor });
+					return read(index.toFieldKey(location.root))[location.index];
+				}),
 				["a", "changed-b", "c", "changed-d", "e"].map((child) => ({ child })),
 			);
 			apply({
@@ -390,8 +814,10 @@ describe("visitDelta", () => {
 				build: [{ id: { minor: 302 }, trees: chunkFromJsonTrees(["changed-e"]) }],
 				global: [{ id: { minor: 104 }, fields: replaceChild(302, 402) }],
 			});
-			assert.deepEqual(read(field0), [{ child: "a" }, { child: "changed-e" }]);
-			assert.deepEqual(index.getLocation({ minor: 104 }), { root: 0, index: 1 });
+			assert.deepEqual(read(field0), [{ child: "a" }]);
+			const editedLocation = index.getLocation({ minor: 104 });
+			assert.deepEqual(read(index.toFieldKey(editedLocation.root)), [{ child: "changed-e" }]);
+			assert.equal(editedLocation.index, 0);
 		});
 
 		it("preserves pending node identities through a batched rename and attachment", () => {
