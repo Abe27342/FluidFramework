@@ -60,6 +60,11 @@ export interface ReadOnlyDetachedFieldIndex {
 	getLocation(id: Delta.DetachedNodeId): DetachedNodeLocation;
 
 	/**
+	 * Returns the number of roots in a registered forest field, including nonconsecutive ID runs.
+	 */
+	getFieldLength(root: ForestRootId): number;
+
+	/**
 	 * Returns the maximal prefix of the query at consecutive node indices in one forest field,
 	 * or the maximal missing prefix if the first ID is unknown.
 	 * Lifetime boundaries do not split the result.
@@ -325,6 +330,14 @@ export class DetachedFieldIndex implements ReadOnlyDetachedFieldIndex {
 		}
 		assert(position === range.end, "Forest field range contains untracked nodes");
 		return result;
+	}
+
+	public getFieldLength(root: ForestRootId): number {
+		const records = this.fieldToRanges.get(root);
+		assert(records !== undefined, "Unknown detached field");
+		const last = records[records.length - 1];
+		assert(last !== undefined, "Registered detached fields must not be empty");
+		return last.index + last.count;
 	}
 
 	private getCheckedField(root: ForestRootId, range: Range): readonly DetachedFieldRange[] {

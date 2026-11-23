@@ -5,6 +5,7 @@
 
 import { strict as assert } from "node:assert";
 
+import { createEmitter } from "@fluid-internal/client-utils";
 import {
 	type IMockLoggerExt,
 	TelemetryDataTag,
@@ -24,14 +25,21 @@ import {
 	EmptyKey,
 	type NormalizedFieldUpPath,
 	LeafNodeStoredSchema,
+	makeDetachedFieldIndex,
+	offsetDetachId,
 	type TreeNodeSchemaIdentifier,
 	type TreeStoredSchema,
 	TreeStoredSchemaRepository,
 	ValueSchema,
 } from "../../core/index.js";
-import { FieldKinds, MockNodeIdentifierManager } from "../../feature-libraries/index.js";
+import {
+	defaultIncrementalEncodingPolicy,
+	FieldKinds,
+	MockNodeIdentifierManager,
+} from "../../feature-libraries/index.js";
 import {
 	ChangeProcessorApplicability,
+	type BranchTrimmingEvents,
 	type SquashingTransactionOptions,
 } from "../../shared-tree-core/index.js";
 import {
@@ -41,6 +49,7 @@ import {
 	BranchCheckout,
 	type TreeCheckoutOptions,
 	type ITreeCheckout,
+	buildConfiguredForest,
 	createTreeCheckout,
 	type SharedTreeChange,
 	forkAsBranchCheckout,
@@ -385,6 +394,201 @@ describe("sharedTreeView", () => {
 				view.dispose();
 			}
 		});
+	});
+
+	describe("grouped repair data", () => {
+		const config = new TreeViewConfiguration({
+			schema: StringArray,
+			enableSchemaValidation,
+		});
+
+		function setup(content: string[], allowGroupedDetaches = true) {
+			const removedRoots = makeDetachedFieldIndex("repair");
+			const checkout = createTreeCheckout(
+				testIdCompressor,
+				mintRevisionTag,
+				testRevisionTagCodec,
+				{ removedRoots, allowGroupedDetaches },
+			);
+			const view = checkout.viewWith(config);
+			view.initialize(content);
+			return { checkout, view, removedRoots };
+		}
+
+		for (const allowGroupedDetaches of [false, true]) {
+			it(`partially restores an overlapping fork deletion from retained roots (grouped: ${allowGroupedDetaches})`, () => {
+				const { checkout, view } = setup(["A", "B", "C", "D"], allowGroupedDetaches);
+				const fork = checkout.fork();
+				const forkView = fork.viewWith(config);
+				const { undoStack, unsubscribe } = createTestUndoRedoStacks(fork.events);
+				forkView.root.removeRange(1, 3);
+				const undo = undoStack.pop() ?? assert.fail("Expected deletion revertible");
+				view.root.removeRange(0, 4);
+				const ranges = [...checkout.removedRoots.ranges()];
+				assert.equal(ranges.length, allowGroupedDetaches ? 1 : 4);
+				assert.equal(ranges[0].count, allowGroupedDetaches ? 4 : 1);
+				assert.deepEqual(
+					checkout.getRemovedRoots().map((entry) => entry[2].value),
+					["A", "B", "C", "D"],
+				);
+
+				fork.rebaseOnto(checkout);
+				undo.revert();
+				assert.deepEqual([...forkView.root], ["B", "C"]);
+				assert.deepEqual(
+					fork
+						.getRemovedRoots()
+						.map((entry) => entry[2].value)
+						.sort(),
+					["A", "D"],
+				);
+				unsubscribe();
+				forkView.dispose();
+				view.dispose();
+			});
+		}
+
+		for (const count of [16, 65_536]) {
+			it(`retains ${count} deleted leaves with one detach and one forest field`, () => {
+				const sf = new SchemaFactory("grouped repair data work count");
+				const numberArray = sf.array(sf.number);
+				const schema = new TreeStoredSchemaRepository();
+				const removedRoots = makeDetachedFieldIndex("repair");
+				const checkout = createTreeCheckout(
+					testIdCompressor,
+					mintRevisionTag,
+					testRevisionTagCodec,
+					{
+						schema,
+						removedRoots,
+						allowGroupedDetaches: true,
+						forest: buildConfiguredForest(
+							new Breakable("grouped repair data work count"),
+							ForestTypeOptimized,
+							schema,
+							testIdCompressor,
+							defaultIncrementalEncodingPolicy,
+						),
+					},
+				);
+				const view = checkout.viewWith(
+					new TreeViewConfiguration({ schema: numberArray, enableSchemaValidation }),
+				);
+				view.initialize(Array.from({ length: count }, (_, index) => index));
+				const { undoStack, unsubscribe } = createTestUndoRedoStacks(checkout.events);
+				const detachedCounts: number[] = [];
+				checkout.forest.registerAnnouncedVisitor(() =>
+					createAnnouncedVisitor({
+						beforeDetach: (range) => {
+							detachedCounts.push(range.end - range.start);
+						},
+					}),
+				);
+
+				view.root.removeRange(0, count);
+				assert.equal(view.root.length, 0);
+				assert.deepEqual(detachedCounts, [count]);
+				assert.equal(undoStack.length, 1);
+				assert.equal(undoStack[0].status, RevertibleStatus.Valid);
+				const ranges = [...removedRoots.ranges()];
+				assert.equal(ranges.length, 1);
+				assert.equal(ranges[0].count, count);
+
+				const cursor = checkout.forest.getCursorAboveDetachedFields();
+				let detachedFieldCount = 0;
+				if (cursor.firstField()) {
+					do {
+						if (cursor.getFieldKey() !== rootFieldKey) {
+							detachedFieldCount++;
+							assert.equal(cursor.getFieldKey(), removedRoots.toFieldKey(ranges[0].root));
+							assert.equal(cursor.getFieldLength(), count);
+						}
+					} while (cursor.nextField());
+				}
+				assert.equal(detachedFieldCount, 1);
+				unsubscribe();
+				view.dispose();
+			});
+		}
+
+		it("collects mixed-lifetime ranges using their current offsets without affecting a fork", () => {
+			const content = ["A", "B", "C", "D", "E", "F"];
+			const { checkout, view, removedRoots } = setup(content);
+			const trimmer = createEmitter<BranchTrimmingEvents>();
+			checkout.mainBranch.trimmer = trimmer;
+			view.root.removeRange(0, content.length);
+			const deletionRevision = checkout.mainBranch.getHead().revision;
+			const ranges = [...removedRoots.ranges()];
+			assert.equal(ranges.length, 1);
+			assert.equal(ranges[0].count, content.length);
+			const { id } = ranges[0];
+			const retainedRevision = mintRevisionTag();
+			removedRoots.updateLatestRevision(offsetDetachId(id, 1), retainedRevision);
+			removedRoots.updateLatestRevision(offsetDetachId(id, 4), retainedRevision);
+			const fork = checkout.fork();
+			fork.mainBranch.trimmer = undefined;
+			const destroyedCounts: number[] = [];
+			checkout.forest.registerAnnouncedVisitor(() =>
+				createAnnouncedVisitor({
+					beforeDestroy: (_field, range) => {
+						destroyedCounts.push(range.end - range.start);
+					},
+				}),
+			);
+
+			trimmer.emit("ancestryTrimmed", [deletionRevision]);
+			assert.deepEqual(destroyedCounts, [1, 2, 1]);
+			assert.deepEqual(
+				checkout.getRemovedRoots().map((entry) => entry[2].value),
+				["B", "E"],
+			);
+			assert.equal(removedRoots.getLocation(offsetDetachId(id, 1)).index, 0);
+			assert.equal(removedRoots.getLocation(offsetDetachId(id, 4)).index, 1);
+			assert.deepEqual(
+				fork.getRemovedRoots().map((entry) => entry[2].value),
+				content,
+			);
+
+			trimmer.emit("ancestryTrimmed", [retainedRevision]);
+			assert.deepEqual(checkout.getRemovedRoots(), []);
+			fork.dispose();
+			view.dispose();
+		});
+
+		for (const event of ["beforeChange", "afterChange"] as const) {
+			it(`enriches every node of a grouped restoration during ${event}`, () => {
+				const content = ["A", "B", "C"];
+				const { checkout, view, removedRoots } = setup(content);
+				const { undoStack, unsubscribe } = createTestUndoRedoStacks(checkout.events);
+				view.root.removeRange(0, content.length);
+				assert.equal([...removedRoots.ranges()].length, 1);
+
+				let callCount = 0;
+				const stop = checkout.mainBranch.events.on(event, (change) => {
+					callCount++;
+					assert.equal(change.type, "append");
+					assert.equal(change.newCommits.length, 1);
+					const commit = change.newCommits[0];
+					const enriched = checkout.enrich(commit.parent ?? assert.fail(), [commit], false);
+					const data = enriched[0].changes[0];
+					assert.equal(data.type, "data");
+					const refreshers = data.innerChange.refreshers;
+					assert(refreshers !== undefined);
+					const values = Array.from(refreshers.values(), (chunk) => {
+						const cursor = chunk.cursor();
+						cursor.enterNode(0);
+						return cursor.value;
+					});
+					assert.deepEqual(values.sort(), content);
+				});
+				(undoStack.pop() ?? assert.fail("Expected deletion revertible")).revert();
+				assert.equal(callCount, 1);
+				assert.deepEqual([...view.root], content);
+				stop();
+				unsubscribe();
+				view.dispose();
+			});
+		}
 	});
 
 	describe("Events", () => {

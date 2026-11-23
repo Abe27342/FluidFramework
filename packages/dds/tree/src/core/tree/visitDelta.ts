@@ -17,7 +17,11 @@ import type { FieldKey } from "../schema-stored/index.js";
 import type { TreeChunk } from "./chunk.js";
 import { mapCursorField, type ITreeCursorSynchronous } from "./cursor.js";
 import type * as Delta from "./delta.js";
-import { areDetachedNodeIdsEqual, offsetDetachId } from "./deltaUtil.js";
+import {
+	areDetachedNodeIdsEqual,
+	deltaFieldMapHasChanges,
+	offsetDetachId,
+} from "./deltaUtil.js";
 import type { DetachedFieldIndex } from "./detachedFieldIndex.js";
 import type { ForestRootId, Major, Minor } from "./detachedFieldIndexTypes.js";
 import type { NodeIndex, PlaceIndex, Range } from "./pathTree.js";
@@ -61,12 +65,16 @@ import type { NodeIndex, PlaceIndex, Range } from "./pathTree.js";
  * @param visitor - The object to notify of the changes encountered.
  * @param detachedFieldIndex - Index responsible for keeping track of the existing detached fields.
  * @param latestRevision - The latest revision tag associated with this delta.
+ * @param allowGroupedDetaches - Whether to create detached fields containing multiple roots.
+ * The owner must select this policy consistently with its summary writer.
+ * Existing grouped input can be read and consumed regardless of this policy.
  */
 export function visitDelta(
 	delta: Delta.Root,
 	visitor: DeltaVisitor,
 	detachedFieldIndex: DetachedFieldIndex,
 	latestRevision: RevisionTag | undefined,
+	allowGroupedDetaches: boolean = false,
 ): void {
 	const detachPassRoots: RootChanges = new Map();
 	const attachPassRoots: RootChanges = new Map();
@@ -87,6 +95,7 @@ export function visitDelta(
 	}
 	const detachConfig: PassConfig = {
 		func: detachPass,
+		allowGroupedDetaches,
 		latestRevision,
 		refreshers,
 		detachedFieldIndex,
@@ -110,9 +119,11 @@ export function visitDelta(
 		visitor,
 		refreshers,
 		latestRevision,
+		allowGroupedDetaches,
 	);
 	const attachConfig: PassConfig = {
 		func: attachPass,
+		allowGroupedDetaches,
 		latestRevision,
 		refreshers,
 		detachedFieldIndex,
@@ -129,7 +140,7 @@ export function visitDelta(
 	collectDestroys(delta.destroy, attachConfig);
 	for (const { id, count } of rootDestructions) {
 		for (let offset = 0; offset < count; ) {
-			const span = detachedFieldIndex.getFirst(offsetDetachId(id, offset), 1);
+			const span = detachedFieldIndex.getFirst(offsetDetachId(id, offset), count - offset);
 			assert(span.value !== undefined, "Destroyed detached nodes must exist");
 			const { root, index } = span.value;
 			const range = { start: index, end: index + span.length };
@@ -217,7 +228,23 @@ function fixedPointVisitOfRoots(
 				deleteFromNestedMap(roots, major, minor);
 				const id = { major, minor };
 				config.currentRoot = id;
-				const { root, index } = config.detachedFieldIndex.getLocation(id);
+				let { root, index } = config.detachedFieldIndex.getLocation(id);
+				if (
+					deltaFieldMapHasChanges(modifications) &&
+					config.detachedFieldIndex.getFieldLength(root) > 1
+				) {
+					// Nested edits can consume siblings, even indirectly through other pending roots.
+					// Move the edited root before descending so its active field cannot be a sibling source.
+					const source = config.detachedFieldIndex.toFieldKey(root);
+					const range = { start: index, end: index + 1 };
+					config.detachedFieldIndex.deleteRange(root, range);
+					// Every pending root was created, modified, or renamed at latestRevision.
+					root = config.detachedFieldIndex.createRange(id, config.latestRevision);
+					visitor.enterField(source);
+					visitor.detach(range, config.detachedFieldIndex.toFieldKey(root), id, false);
+					visitor.exitField(source);
+					index = 0;
+				}
 				const field = config.detachedFieldIndex.toFieldKey(root);
 				visitor.enterField(field);
 				// Note: each visit may lead to `roots` being populated with new entries or having some entries removed.
@@ -249,6 +276,7 @@ function transferRoots(
 	visitor: DeltaVisitor,
 	refreshers: NestedMap<Major, Minor, ITreeCursorSynchronous>,
 	revision?: RevisionTag,
+	allowGroupedDetaches: boolean = false,
 ): void {
 	let nextBatch = rootTransfers.filter(({ oldId, newId, count }) => {
 		// It's possible for a detached node to be revived transiently such that it ends up back in the same detached field.
@@ -262,10 +290,18 @@ function transferRoots(
 		const delayed: Delta.DetachedNodeRename[] = [];
 		let madeProgress = false;
 		for (const rename of nextBatch) {
+			if (
+				allowGroupedDetaches &&
+				nextBatch.length === 1 &&
+				tryTransferOverlappingRange(rename, mapToUpdate, detachedFieldIndex, visitor, revision)
+			) {
+				madeProgress = true;
+				continue;
+			}
 			for (let offset = 0; offset < rename.count; ) {
 				const oldId = offsetDetachId(rename.oldId, offset);
 				const newId = offsetDetachId(rename.newId, offset);
-				const remaining = 1;
+				const remaining = rename.count - offset;
 				let source = detachedFieldIndex.getFirst(oldId, remaining);
 				if (source.value === undefined) {
 					const tree = tryGetFromNestedMap(refreshers, oldId.major, oldId.minor);
@@ -286,6 +322,7 @@ function transferRoots(
 					}
 					delayed.push({ oldId, newId, count });
 				} else if (destination.value === undefined) {
+					count = allowGroupedDetaches ? count : 1;
 					const { root, index } = source.value;
 					const newRoot = detachedFieldIndex.createRange(newId, revision, count);
 					const range = { start: index, end: index + count };
@@ -307,6 +344,44 @@ function transferRoots(
 		assert(madeProgress, 0x7cf /* transferRoots should make progress */);
 		nextBatch = delayed;
 	}
+}
+
+/**
+ * A contiguous range can rename over its own IDs without atomizing the dependency chain.
+ * The destination IDs outside that source range must be free.
+ * Used only for the sole remaining rename so other chains retain their dependency ordering.
+ */
+function tryTransferOverlappingRange(
+	{ oldId, newId, count }: Delta.DetachedNodeRename,
+	changes: RootChanges,
+	index: DetachedFieldIndex,
+	visitor: DeltaVisitor,
+	revision: RevisionTag | undefined,
+): boolean {
+	const shift = newId.minor - oldId.minor;
+	if (oldId.major !== newId.major || shift === 0 || Math.abs(shift) >= count) {
+		return false;
+	}
+	const source = index.getFirst(oldId, count);
+	if (source.value === undefined || source.length !== count) {
+		return false;
+	}
+	const outside = index.getFirst(
+		shift > 0 ? offsetDetachId(oldId, count) : newId,
+		Math.abs(shift),
+	);
+	if (outside.value !== undefined || outside.length !== Math.abs(shift)) {
+		return false;
+	}
+	const range = { start: source.value.index, end: source.value.index + count };
+	const sourceField = index.toFieldKey(source.value.root);
+	index.deleteRange(source.value.root, range);
+	const destination = index.createRange(newId, revision, count);
+	visitor.enterField(sourceField);
+	visitor.detach(range, index.toFieldKey(destination), newId, false);
+	visitor.exitField(sourceField);
+	renameRootChanges(changes, oldId, newId, count);
+	return true;
 }
 
 /**
@@ -450,6 +525,7 @@ export interface DeltaVisitor {
 
 interface PassConfig {
 	readonly func: Pass;
+	readonly allowGroupedDetaches: boolean;
 
 	/**
 	 * The detached root whose subtree is being visited, if any.
@@ -561,8 +637,7 @@ function detachPass(
 		}
 		if (mark.detach !== undefined) {
 			for (let offset = 0; offset < mark.count; ) {
-				// Keep field creation singleton until the producing checkout selects a range-capable writer.
-				const count = 1;
+				const count = config.allowGroupedDetaches ? mark.count - offset : 1;
 				const id = offsetDetachId(mark.detach, offset);
 				const root = config.detachedFieldIndex.createRange(id, config.latestRevision, count);
 				if (mark.fields !== undefined) {
@@ -604,9 +679,13 @@ function tryReplace(
 	}
 	for (let offset = 0; offset < mark.count; ) {
 		const id = offsetDetachId(mark.attach, offset);
-		const source = config.detachedFieldIndex.getFirst(id, 1);
+		const source = config.detachedFieldIndex.getFirst(id, mark.count - offset);
 		if (
 			source.value === undefined ||
+			(config.currentRoot !== undefined &&
+				config.currentRoot.major === id.major &&
+				config.currentRoot.minor >= id.minor &&
+				config.currentRoot.minor < id.minor + source.length) ||
 			firstRootChangeOffset(config.detachPassRoots, id, source.length) < source.length ||
 			firstRootChangeOffset(config.attachPassRoots, id, source.length) < source.length
 		) {
@@ -617,9 +696,9 @@ function tryReplace(
 	for (let offset = 0; offset < mark.count; ) {
 		const attachId = offsetDetachId(mark.attach, offset);
 		const detachId = offsetDetachId(mark.detach, offset);
-		const source = config.detachedFieldIndex.getFirst(attachId, 1);
+		const source = config.detachedFieldIndex.getFirst(attachId, mark.count - offset);
 		assert(source.value !== undefined, "Replacement source must remain available");
-		const count = source.length;
+		const count = config.allowGroupedDetaches ? source.length : 1;
 		const { root, index: sourceIndex } = source.value;
 		const sourceRange = { start: sourceIndex, end: sourceIndex + count };
 		const destination = config.detachedFieldIndex.createRange(
@@ -734,7 +813,7 @@ function attachPass(
 		if (mark.attach !== undefined) {
 			for (let offset = 0; offset < mark.count; ) {
 				const offsetAttachId = offsetDetachId(mark.attach, offset);
-				let source = config.detachedFieldIndex.getFirst(offsetAttachId, 1);
+				let source = config.detachedFieldIndex.getFirst(offsetAttachId, mark.count - offset);
 				if (source.value === undefined) {
 					const tree = tryGetFromNestedMap(
 						config.refreshers,
@@ -749,7 +828,7 @@ function attachPass(
 						config.latestRevision,
 						visitor,
 					);
-					source = config.detachedFieldIndex.getFirst(offsetAttachId, 1);
+					source = config.detachedFieldIndex.getFirst(offsetAttachId, mark.count - offset);
 				}
 				assert(source.value !== undefined, "Attached detached nodes must exist");
 				const { root, index: sourceIndex } = source.value;
@@ -766,6 +845,12 @@ function attachPass(
 					config.currentRoot !== undefined &&
 					areDetachedNodeIdsEqual(offsetAttachId, config.currentRoot)
 				) {
+					assert(
+						count === 1 &&
+							sourceIndex === 0 &&
+							config.detachedFieldIndex.getFieldLength(root) === 1,
+						"Cycle-closing attachments must consume an isolated root",
+					);
 					config.cyclicRoots.push(root);
 					omittedAttaches += count;
 				} else {
