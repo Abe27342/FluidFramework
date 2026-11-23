@@ -7,11 +7,15 @@ import { strict as assert } from "node:assert";
 
 import {
 	type DetachedNodeRange,
+	EmptyKey,
 	TreeStoredSchemaRepository,
+	makeAnonChange,
 	makeDetachedFieldIndex,
+	mapCursorField,
 	rootFieldKey,
 } from "../../core/index.js";
 import {
+	FieldKinds,
 	NodeMoveType,
 	buildChunkedForest,
 	defaultIncrementalEncodingPolicy,
@@ -23,6 +27,7 @@ import {
 	UniformChunk,
 	// eslint-disable-next-line import-x/no-internal-modules
 } from "../../feature-libraries/chunked-forest/uniformChunk.js";
+import { JsonAsTree } from "../../jsonDomainSchema.js";
 import {
 	SharedTreeChangeEnricher,
 	// eslint-disable-next-line import-x/no-internal-modules
@@ -34,7 +39,12 @@ import type {
 import { numberSchema } from "../../simple-tree/index.js";
 import { brand } from "../../util/index.js";
 // eslint-disable-next-line import-x/no-internal-modules
+import { defaultFamily } from "../feature-libraries/default-field-kinds/defaultChangesetUtil.js";
+// eslint-disable-next-line import-x/no-internal-modules
 import { Change } from "../feature-libraries/modular-schema/modularChangesetUtil.js";
+// eslint-disable-next-line import-x/no-internal-modules
+import { MarkMaker } from "../feature-libraries/sequence-field/testEdits.js";
+import { cursorToJsonObject } from "../json/index.js";
 import { jsonSequenceRootSchema } from "../sequenceRootUtils.js";
 import { chunkToMapTreeField } from "../utils.js";
 
@@ -176,4 +186,81 @@ describe("SharedTreeChangeEnricher", () => {
 			refresher.referenceRemoved();
 		}
 	});
+
+	for (const cycle of [false, true]) {
+		it(`queries surviving ranges immediately after grouped replay (cycle: ${cycle})`, () => {
+			const schema = new TreeStoredSchemaRepository(jsonSequenceRootSchema);
+			const forest = buildChunkedForest(
+				makeTreeChunker(schema, defaultSchemaPolicy, defaultIncrementalEncodingPolicy),
+			);
+			const index = makeDetachedFieldIndex("");
+			const root = index.createRange({ minor: 10 }, undefined, 4);
+			const leaf = new TreeShape(brand(numberSchema.identifier), true, []);
+			const array = new TreeShape(brand(JsonAsTree.Array.identifier), false, [
+				[EmptyKey, leaf, 1],
+			]);
+			const chunk = new UniformChunk(array.withTopLevelLength(4), [0, 1, 2, 3]);
+			forest.roots.fields.set(index.toFieldKey(root), [chunk]);
+			const enricher = new SharedTreeChangeEnricher(forest, index, schema);
+			const replay = Change.build({
+				family: defaultFamily,
+				roots: [
+					{
+						detachId: { localId: brand(11) },
+						change: Change.node(
+							0,
+							Change.field(EmptyKey, FieldKinds.sequence.identifier, [
+								MarkMaker.revive(cycle ? 2 : 1, { localId: brand(10) }),
+								...(cycle
+									? [MarkMaker.skip(1), MarkMaker.revive(1, { localId: brand(12) })]
+									: []),
+							]),
+						),
+					},
+				],
+			});
+			enricher.enqueueChange(
+				makeAnonChange({ changes: [{ type: "data", innerChange: replay }] }),
+			);
+
+			const enriched = enricher.enrich({
+				changes: [
+					...changeWithRelevantRoots([]).changes,
+					...changeWithRelevantRoots([{ id: { minor: 10 }, count: 4 }]).changes,
+				],
+			});
+			const change = enriched.changes[1];
+			assert(change.type === "data");
+			assert.deepEqual(
+				change.innerChange.refreshers
+					?.toArray()
+					.map(([id, refresher]) => [
+						id,
+						mapCursorField(refresher.cursor(), cursorToJsonObject),
+					]),
+				cycle
+					? [[[undefined, 13], [[3]]]]
+					: [
+							[[undefined, 11], [[[0], 1]]],
+							[
+								[undefined, 12],
+								[[2], [3]],
+							],
+						],
+			);
+			assert.deepEqual(
+				[...index.ranges()].map(({ count }) => count),
+				[4],
+			);
+			assert.deepEqual(mapCursorField(chunk.cursor(), cursorToJsonObject), [
+				[0],
+				[1],
+				[2],
+				[3],
+			]);
+			for (const refresher of change.innerChange.refreshers?.values() ?? []) {
+				refresher.referenceRemoved();
+			}
+		});
+	}
 });
