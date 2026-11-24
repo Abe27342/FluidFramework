@@ -15,6 +15,7 @@ import type { RevisionTagCodec } from "../rebase/index.js";
 
 import { makeDetachedNodeToFieldCodecV1 } from "./detachedFieldIndexCodecV1.js";
 import { makeDetachedNodeToFieldCodecV2 } from "./detachedFieldIndexCodecV2.js";
+import { makeDetachedNodeToFieldCodecRange } from "./detachedFieldIndexCodecRange.js";
 import { DetachedFieldIndexFormatVersion } from "./detachedFieldIndexFormatCommon.js";
 
 type BuildData = ICodecOptions & {
@@ -36,6 +37,12 @@ export const detachedFieldIndexCodecBuilder = VersionDispatchingCodecBuilder.bui
 			formatVersion: DetachedFieldIndexFormatVersion.v2,
 			codec: (buildData: BuildData) =>
 				makeDetachedNodeToFieldCodecV2(buildData.revisionTagCodec, buildData.idCompressor),
+		},
+		{
+			minVersionForCollab: undefined,
+			formatVersion: DetachedFieldIndexFormatVersion.vRangeExperimental,
+			codec: (buildData: BuildData) =>
+				makeDetachedNodeToFieldCodecRange(buildData.revisionTagCodec, buildData.idCompressor),
 		},
 	],
 );

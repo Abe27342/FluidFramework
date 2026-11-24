@@ -27,6 +27,7 @@ import {
 } from "../codec/index.js";
 import {
 	type FieldKey,
+	DetachedFieldIndexFormatVersion,
 	type GraphCommit,
 	type JsonableTree,
 	LeafNodeStoredSchema,
@@ -238,6 +239,11 @@ export class SharedTreeKernel
 			options.shouldEncodeIncrementally,
 		);
 		const removedRoots = makeDetachedFieldIndex("repair");
+		// Reader support does not enable grouped creation or select a newer writer.
+		// The codec builder separately validates the experimental compatibility acknowledgment.
+		const allowGroupedDetaches =
+			options.writeVersionOverrides.get("DetachedFieldIndex") ===
+			DetachedFieldIndexFormatVersion.vRangeExperimental;
 		const schemaCodec = schemaCodecBuilder.build(options);
 		const schemaSummarizer = new SchemaSummarizer(
 			schema,
@@ -336,6 +342,7 @@ export class SharedTreeKernel
 			fieldBatchCodec,
 			removedRoots,
 			chunkCompressionStrategy: options.treeEncodeType,
+			allowGroupedDetaches,
 			codecOptions: options,
 			getFinalizedCommit: () => this.getTrunkHead(),
 		});

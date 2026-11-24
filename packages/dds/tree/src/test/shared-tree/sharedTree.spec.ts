@@ -36,6 +36,7 @@ import { FluidClientVersion } from "../../codec/index.js";
 import {
 	CommitKind,
 	CommitOutcome,
+	DetachedFieldIndexFormatVersion,
 	type Revertible,
 	type UpPath,
 	moveToDetachedField,
@@ -606,6 +607,109 @@ describe("SharedTree", () => {
 		assert(schemaReadCompleted);
 		assert(forestRead);
 		assert.deepEqual([...loadedTree.viewWith(configuration).root], ["loaded"]);
+	});
+
+	describe("experimental detached range persistence", () => {
+		const configuration = new TreeViewConfiguration({
+			schema: StringArray,
+			enableSchemaValidation,
+		});
+		const writeVersionOverrides = new Map([
+			["DetachedFieldIndex" as const, DetachedFieldIndexFormatVersion.vRangeExperimental],
+		]);
+
+		it("requires explicit compatibility acknowledgment before writing ranges", () => {
+			const factory = SharedTreeTestFactory.build(() => {}, undefined, {
+				writeVersionOverrides,
+			});
+			assert.throws(
+				() => new TestTreeProviderLite(1, factory),
+				validateUsageError(/allowPossiblyIncompatibleWriteVersionOverrides/),
+			);
+		});
+
+		it("loads range summaries without enabling grouped producers or experimental writing", async () => {
+			const writerFactory = SharedTreeTestFactory.build(() => {}, undefined, {
+				writeVersionOverrides,
+				allowPossiblyIncompatibleWriteVersionOverrides: true,
+				retainHistory: true,
+				jsonValidator: FormatValidatorBasic,
+				forest: ForestTypeOptimized,
+			});
+			const provider = new TestTreeProviderLite(1, writerFactory);
+			const [writer] = provider.trees;
+			const view = writer.viewWith(configuration);
+			view.initialize(["a", "b", "c", "d", "e"]);
+			provider.synchronizeMessages();
+			view.root.removeRange(0, 5);
+			provider.synchronizeMessages();
+			const retained = [...writer.kernel.checkout.removedRoots.ranges()];
+			assert.equal(retained.length, 1);
+			assert.equal(retained[0].count, 5);
+			const { summary } = await writer.summarize();
+
+			const readerFactory = SharedTreeTestFactory.build(() => {}, undefined, {
+				retainHistory: true,
+				jsonValidator: FormatValidatorBasic,
+			});
+			const runtime = new MockFluidDataStoreRuntime({
+				idCompressor: provider.getCompressor(writer),
+			});
+			const reader = await readerFactory.load(
+				runtime,
+				"range-reader",
+				{
+					deltaConnection: runtime.createDeltaConnection(),
+					objectStorage: MockStorage.createFromSummary(summary),
+				},
+				readerFactory.attributes,
+			);
+			const readerView = reader.viewWith(configuration);
+			assert.deepEqual([...readerView.root], []);
+			assert.deepEqual(
+				reader.kernel.checkout.getRemovedRoots().map((entry) => entry[2].value),
+				["a", "b", "c", "d", "e"],
+			);
+			const loadedRanges = [...reader.kernel.checkout.removedRoots.ranges()];
+			assert.equal(loadedRanges.length, 1);
+			const loadedRange = loadedRanges[0];
+			assert.deepEqual(reader.kernel.checkout.removedRoots.getFirst(loadedRange.id, 5), {
+				value: { root: loadedRange.root, index: 0 },
+				length: 5,
+			});
+			const readerFork = reader.kernel.checkout.fork();
+			const forkView = readerFork.viewWith(configuration);
+			forkView.root.insertAtEnd("new-a", "new-b");
+			forkView.root.removeRange(0, 2);
+			const newlyDetachedRanges = [...readerFork.removedRoots.ranges()].filter(
+				({ root }) => root !== loadedRange.root,
+			);
+			assert.deepEqual(
+				newlyDetachedRanges.map(({ count }) => count),
+				[1, 1],
+			);
+			assert.notEqual(newlyDetachedRanges[0].root, newlyDetachedRanges[1].root);
+			forkView.dispose();
+			await assert.rejects(
+				reader.summarize(),
+				/Legacy detached field formats cannot encode grouped fields/,
+			);
+
+			const rewriterRuntime = new MockFluidDataStoreRuntime({
+				idCompressor: provider.getCompressor(writer),
+			});
+			const rewriter = await writerFactory.load(
+				rewriterRuntime,
+				"range-rewriter",
+				{
+					deltaConnection: rewriterRuntime.createDeltaConnection(),
+					objectStorage: MockStorage.createFromSummary(summary),
+				},
+				writerFactory.attributes,
+			);
+			await rewriter.summarize();
+			assert.equal([...rewriter.kernel.checkout.removedRoots.ranges()].length, 1);
+		});
 	});
 
 	it("can summarize and load", async () => {
